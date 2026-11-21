@@ -8,6 +8,9 @@ Página estática única (`public/index.html`), sem build. Os dados ficam no nav
 Login por PIN com perfis (proprietário, gerente, operador de caixa, garçom, cozinha), autorização de gerente para descontos, cancelamentos e sangrias, bloqueio por inatividade e registro de auditoria.
 PINs iniciais de demonstração (troque antes de usar): Proprietário 1234, Gerente 2345, Caixa 3456, Garçom 4567.
 
+## Modo nuvem (vários restaurantes)
+A pasta `backend/` tem a API serverless (AWS Lambda, API Gateway e DynamoDB) e o modelo de implantação AWS SAM. Com `public/config.js` apontando para a API, o sistema passa a usar login e dados no servidor, sincronizados entre computadores. Veja `backend/README.md`.
+
 ## Limites
 - A emissão de NFC-e está em modo simulação. Para emitir de verdade, configure um provedor de emissão por API na aba Fiscal.
 - A integração com o iFood é simulada.

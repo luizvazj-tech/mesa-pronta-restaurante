@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Mesa Pronta - API multi-restaurante (Lambda + HTTP API + DynamoDB)
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: '*'
+    Description: Endereço do site que usa a API (ex. https://mesa-pronta-w8li.onrender.com). Use '*' só em testes.
+  SignupEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures: [arm64]
+    Timeout: 15
+    MemorySize: 256
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: PK, AttributeType: S }
+        - { AttributeName: SK, AttributeType: S }
+        - { AttributeName: GSI1PK, AttributeType: S }
+        - { AttributeName: GSI1SK, AttributeType: N }
+      KeySchema:
+        - { AttributeName: PK, KeyType: HASH }
+        - { AttributeName: SK, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - { AttributeName: GSI1PK, KeyType: HASH }
+            - { AttributeName: GSI1SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+
+  JwtSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Chave de assinatura das sessões do Mesa Pronta
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowHeaders: [content-type, authorization]
+        AllowMethods: [GET, POST, PUT, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+      RouteSettings:
+        'POST /signup': { ThrottlingBurstLimit: 5, ThrottlingRateLimit: 1 }
+        'POST /login': { ThrottlingBurstLimit: 20, ThrottlingRateLimit: 5 }
+
+  Fn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          JWT_SECRET_ARN: !Ref JwtSecret
+          SIGNUP_ENABLED: !Ref SignupEnabled
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref Table }
+        - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref JwtSecret }
+      Events:
+        Signup:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /signup, Method: POST }
+        Login:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /login, Method: POST }
+        Any:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: '/{proxy+}', Method: ANY }
+
+Outputs:
+  ApiUrl:
+    Description: Endereço da API para colocar em public/config.js
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}'

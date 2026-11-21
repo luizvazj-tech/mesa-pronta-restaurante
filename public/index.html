@@ -117,6 +117,7 @@ pre{white-space:pre-wrap;background:var(--surface2);padding:10px;border-radius:8
 <div class="mb" id="cf" hidden style="z-index:70"><div class="md" id="cfb"></div></div>
 <div class="mb" id="login" hidden style="z-index:100;background:var(--bg)"></div>
 <div id="toast" hidden></div>
+<script src="config.js"></script>
 <script>
 'use strict';
 /* ===== Utilidades ===== */
@@ -144,7 +145,7 @@ let S,ui={user:null,pdv:null,pdvNfce:false,eu:null,fails:0,lockUntil:0,last:Date
 function testStorage(){try{localStorage.setItem('__t','1');localStorage.removeItem('__t');return true}catch(e){return false}}
 function migra(o){o.users=o.users||defaultUsers();o.audit=o.audit||[];o.cfg.bloqueioMin=o.cfg.bloqueioMin||10;const used=new Set();o.produtos.forEach((p,i)=>{if(!p.cod||used.has(p.cod)){let n=101+i;while(used.has(String(n)))n++;p.cod=String(n)}used.add(p.cod)});return o}
 function load(){ui.storageOk=testStorage();if(ui.storageOk){try{const r=localStorage.getItem(LS);if(r){const o=JSON.parse(r);if(o&&o.v===1)return migra(o)}}catch(e){}}return seed()}
-function save(){if(!ui.storageOk)return;try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){ui.storageOk=false}}
+function save(){if(CLOUD()){cloudSaved();return}if(!ui.storageOk)return;try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){ui.storageOk=false}}
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200)}
 
 /* ===== Controle de acesso ===== */
@@ -190,7 +191,7 @@ function mkChave(n,dt){const c=S.cfg,d=new Date(dt);const aamm=String(d.getFullY
  const base=String(UFC[c.uf]||41)+aamm+only(c.cnpj).padStart(14,'0').slice(0,14)+'65'+String(c.serie).padStart(3,'0')+String(n).padStart(9,'0')+'1'+String(Math.floor(Math.random()*1e8)).padStart(8,'0');
  return base+dv11(base)}
 function mkNota(v,doc,sim){
- const n=S.cfg.proxNum++;
+ const n=CLOUD()?0:S.cfg.proxNum++;
  const nota={id:uid(),vendaId:v.id,numero:n,serie:S.cfg.serie,ambiente:S.cfg.ambiente,doc:only(doc),valor:v.total,data:v.data,status:'pendente',chave:'',protocolo:'',msg:''};
  S.notas.push(nota);v.notaId=nota.id;
  if(sim){nota.status='autorizada';nota.chave=mkChave(n,v.data);nota.protocolo='SIM'+Date.now().toString().slice(-9);nota.msg='Autorizada em simulação.'}
@@ -202,6 +203,8 @@ function payloadNota(nota){const v=S.vendas.find(x=>x.id===nota.vendaId),c=S.cfg
  pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:r2(v.serv+v.taxa),total:v.total}}
 async function transmitir(nota){
  const c=S.cfg;
+ if(CLOUD()){if(!navigator.onLine){nota.status='pendente';nota.msg='Sem internet: nota em fila, será transmitida ao reconectar.';return}
+  try{const r=await api('POST','/nfce/transmit',{payload:payloadNota(nota)});nota.numero=r.numero;nota.status=r.status;nota.chave=r.chave;nota.protocolo=r.protocolo;nota.msg=r.msg}catch(e){nota.status='pendente';nota.msg='Servidor inacessível: nota em fila.'}return}
  if(!navigator.onLine){nota.status='pendente';nota.msg='Sem internet: nota em contingência, será transmitida ao reconectar.';return}
  if(c.provedor==='simulado'){nota.status='autorizada';nota.chave=nota.chave||mkChave(nota.numero,nota.data);nota.protocolo='SIM'+Date.now().toString().slice(-9);nota.msg='Autorizada em simulação, sem valor fiscal.';return}
  try{
@@ -280,7 +283,7 @@ const sel=(l,id,opts,v)=>`<label>${l}<select id="${id}">${opts.map(o=>{const [k,
 function renderNav(){
  const b={salao:S.comandas.filter(c=>!c.pdv).length,delivery:S.delivery.filter(d=>d.status!=='entregue'&&d.status!=='cancelado').length,cozinha:cozItens().length+S.delivery.filter(d=>d.status==='preparo').length,estoque:baixos().length,fiscal:notasPend().length};
  $('#nav').innerHTML=`<div class="logo">Mesa Pronta<small>${esc(S.cfg.nome)}</small></div>`+(ui.user?`<div class="net" style="margin:0 0 8px"><b>${esc(ui.user.nome)}</b>${PERFIS[ui.user.perfil].nome}<br><button class="btn sm" style="margin-top:6px" data-act="lock">Bloquear</button> <button class="btn sm" style="margin-top:6px" data-act="mypin">Alterar PIN</button></div>`:'')+TABS.filter(([k])=>tabOk(k)).map(([k,t])=>`<button class="nav ${ui.tab===k?'on':''}" data-act="tab" data-k="${k}">${t}${b[k]?`<span class="bdg">${b[k]}</span>`:''}</button>`).join('')+
- `<div class="net"><b>${navigator.onLine?'Conectado':'Modo offline'}</b>${navigator.onLine?'Notas são transmitidas na hora.':'Vendas seguem normais; notas ficam em fila.'}${ui.storageOk?'':'<br><b>Armazenamento indisponível: dados só valem nesta sessão.</b>'}</div>`}
+ `<div class="net"><b>${navigator.onLine?'Conectado':'Modo offline'}</b>${navigator.onLine?'Notas são transmitidas na hora.':'Vendas seguem normais; notas ficam em fila.'}${ui.storageOk?'':'<br><b>Armazenamento indisponível: dados só valem nesta sessão.</b>'}${CLOUD()?`<br><span id="syncst">${esc(cloudStatusText())}</span>`:''}</div>`}
 
 function vPainel(){
  const h=vendasHoje(),fat=soma(h,v=>v.total),dias=[];
@@ -374,7 +377,7 @@ function vFiscal(){
  ${sel('Provedor','c_prov',[['simulado','Simulado (demonstração)'],['api','API de emissão (webservice)']],c.provedor).replace('<select','<select data-chg="cfg" data-k="provedor"')}
  ${field('URL da API','c_url',c.url,'data-chg="cfg" data-k="url" placeholder="https://..."')}${field('Token da API','c_tok',c.token,'data-chg="cfg" data-k="token" type="password"')}</div>
  <p class="muted">A chave de acesso usa o dígito verificador real (módulo 11). A transmissão à SEFAZ e a assinatura com certificado A1 são feitas pelo provedor; este painel envia os dados da venda em JSON e registra o retorno.</p></div>
- <div class="card" style="margin-top:12px"><h2>Notas emitidas</h2><div class="tw"><table><tr><th>Nº</th><th>Data</th><th class="r">Valor</th><th>Doc.</th><th>Status</th><th>Chave</th><th></th></tr>${ns.slice(0,40).map(n=>`<tr><td>${n.numero}/${n.serie}</td><td>${dmy(n.data)} ${hhmm(n.data)}</td><td class="r">${money(n.valor)}</td><td>${esc(n.doc||'consumidor')}</td><td>${chip(n.status,n.status==='autorizada'?'ok':n.status==='cancelada'?'':'bad')}${n.msg?`<br><span class="muted" style="white-space:normal;font-size:.78rem">${esc(n.msg)}</span>`:''}</td><td class="muted">${n.chave?esc(n.chave.replace(/(\d{4})/g,'$1 ').trim().slice(0,24))+'…':'-'}</td><td>${['pendente','rejeitada'].includes(n.status)?`<button class="btn sm" data-act="reenviar" data-id="${n.id}">Reenviar</button>`:''}${n.status==='autorizada'?`<button class="btn sm bad" data-act="cancnota" data-id="${n.id}">Cancelar</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nenhuma nota.</td></tr>'}</table></div></div>
+ <div class="card" style="margin-top:12px"><h2>Notas emitidas</h2><div class="tw"><table><tr><th>Nº</th><th>Data</th><th class="r">Valor</th><th>Doc.</th><th>Status</th><th>Chave</th><th></th></tr>${ns.slice(0,40).map(n=>`<tr><td>${n.numero||'-'}/${n.serie}</td><td>${dmy(n.data)} ${hhmm(n.data)}</td><td class="r">${money(n.valor)}</td><td>${esc(n.doc||'consumidor')}</td><td>${chip(n.status,n.status==='autorizada'?'ok':n.status==='cancelada'?'':'bad')}${n.msg?`<br><span class="muted" style="white-space:normal;font-size:.78rem">${esc(n.msg)}</span>`:''}</td><td class="muted">${n.chave?esc(n.chave.replace(/(\d{4})/g,'$1 ').trim().slice(0,24))+'…':'-'}</td><td>${['pendente','rejeitada'].includes(n.status)?`<button class="btn sm" data-act="reenviar" data-id="${n.id}">Reenviar</button>`:''}${n.status==='autorizada'?`<button class="btn sm bad" data-act="cancnota" data-id="${n.id}">Cancelar</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nenhuma nota.</td></tr>'}</table></div></div>
  <div class="card" style="margin-top:12px"><h2>Vendas sem nota</h2>${semNota.map(v=>`<div class="row" style="margin:5px 0"><span>#${v.n} · ${dmy(v.data)} ${hhmm(v.data)} · ${esc(v.local||v.canal||v.tipo)}</span><b>${money(v.total)}</b><button class="btn sm right" data-act="emitirvenda" data-id="${v.id}">Emitir NFC-e</button></div>`).join('')||'<p class="muted">Todas as vendas recentes têm nota.</p>'}<p class="muted">A NFC-e normalmente deve ser emitida no momento da venda. Emitir depois só serve para correções operacionais e segue as regras da sua UF.</p></div>`}
 
 function vRelatorios(){
@@ -398,8 +401,8 @@ function vConfig(){
  const c=S.cfg;
  return head('Configurações')+
  `<div class="card"><h2>Estabelecimento</h2><div class="form">${field('Nome','k_nome',c.nome,'data-chg="cfg" data-k="nome"')}${field('Taxa de serviço (%)','k_srv',c.servicoPct,'data-chg="cfgn" data-k="servicoPct"')}${field('Taxa de entrega padrão (R$)','k_ent',c.taxaEntrega,'data-chg="cfgn" data-k="taxaEntrega"')}${field('Quantidade de mesas','k_mesas',c.mesas,'data-chg="cfgn" data-k="mesas"')}${field('ID do restaurante no iFood','k_if',c.ifoodMerchant,'data-chg="cfg" data-k="ifoodMerchant"')}</div></div>
- <div class="card" style="margin-top:12px"><h2>Dados</h2><div class="row"><button class="btn" data-act="zerar">Limpar vendas, pedidos e contas de demonstração</button><button class="btn" data-act="backup">Gerar backup</button><button class="btn bad" data-act="resetall">Restaurar demonstração completa</button></div>
- <label style="margin-top:10px">Backup (copie e guarde; para restaurar, cole aqui e use o botão)<textarea id="bk" rows="4" placeholder="Cole aqui um backup JSON"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="restaurar">Restaurar do texto colado</button></div></div>
+ ${CLOUD()?'<div class="card" style="margin-top:12px"><h2>Dados</h2><p>Os dados deste restaurante ficam no servidor e são sincronizados entre todos os computadores. Cópias de segurança são feitas pelo banco de dados da AWS.</p><div class="row"><button class="btn" data-act="backup">Gerar backup deste computador</button></div></div>':`<div class="card" style="margin-top:12px"><h2>Dados</h2><div class="row"><button class="btn" data-act="zerar">Limpar vendas, pedidos e contas de demonstração</button><button class="btn" data-act="backup">Gerar backup</button><button class="btn bad" data-act="resetall">Restaurar demonstração completa</button></div>
+ <label style="margin-top:10px">Backup (copie e guarde; para restaurar, cole aqui e use o botão)<textarea id="bk" rows="4" placeholder="Cole aqui um backup JSON"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="restaurar">Restaurar do texto colado</button></div></div>`}
  <div class="card" style="margin-top:12px"><h2>Limites desta versão</h2><p>Os dados ficam neste navegador e funcionam sem internet. Para vários caixas e tablets sincronizados, rastreio de entregador, integração real com iFood e transmissão fiscal efetiva, é preciso hospedar o sistema com banco de dados e servidor próprios.</p></div>`}
 
 const VIEWS={pdv:vPdv,acesso:vAcesso,painel:vPainel,salao:vSalao,delivery:vDelivery,cozinha:vCozinha,produtos:vProdutos,estoque:vEstoque,producao:vProducao,financeiro:vFinanceiro,fiscal:vFiscal,relatorios:vRelatorios,assistente:vAssistente,config:vConfig};
@@ -455,6 +458,7 @@ async function confirmPay(){autoFix();const p=ui.pay,k=payCalc();
  let troco=r2(-k.falta),pags=p.pags.map(g=>({...g}));
  if(troco>0.005){const din=soma(pags.filter(g=>g.forma==='Dinheiro'),g=>g.valor);if(din<troco)return toast('O troco só pode sair de pagamento em dinheiro.');let rest=troco;pags.forEach(g=>{if(g.forma==='Dinheiro'&&rest>0){const t=Math.min(g.valor,rest);g.valor=r2(g.valor-t);rest=r2(rest-t)}});pags=pags.filter(g=>g.valor>0)}else troco=0;
  const src=k.src,del=p.ref.kind==='del';
+ if(CLOUD()&&navigator.onLine){try{S.seq=(await api('POST','/counter',{name:'venda'})).n}catch(e){}}
  const v=mkVenda({tipo:del?'delivery':src.mesa?'salao':'balcao',itens:src.itens.map(i=>({pid:i.pid,qtd:i.qtd})),local:src.local||'',canal:src.canal||'',cliente:src.cliente||'',servico:k.serv,desc:k.desc,taxa:k.taxa,pagamentos:pags,troco});
  if(!del){baixa(src.itens,1);S.comandas=S.comandas.filter(c=>c.id!==src.id)}else{if(!src.baixado){baixa(src.itens,1);src.baixado=true}src.status='entregue';src.vendaId=v.id}
  let nota=null;if(p.emitir){nota=mkNota(v,p.doc,false);await transmitir(nota)}
@@ -581,7 +585,7 @@ const A={
  restaurar(){try{const o=JSON.parse($('#bk').value);if(!o||o.v!==1||!o.produtos)throw 0;S=migra(o);ui.user=null;save();showLogin();toast('Backup restaurado.')}catch(e){toast('Texto de backup inválido.')}}
 };
 const CH={
- cfg(v,d){S.cfg[d.k]=v;save();if(d.k==='nome')renderNav()},
+ cfg(v,d){if(CLOUD()&&FISCAL_KEYS.includes(d.k)){const body={};body[d.k]=v;api('PUT','/fiscal',body).then(()=>{if(d.k!=='token')S.cfg[d.k]=v;toast('Configuração fiscal salva no servidor.')}).catch(e=>toast(e.message));return}S.cfg[d.k]=v;save();if(d.k==='nome')renderNav()},
  cfgn(v,d){S.cfg[d.k]=num(v);if(d.k==='mesas')S.cfg.mesas=Math.max(1,Math.min(60,Math.round(num(v))));save()},
  kg(v,d){const c=curCmd();c.itens[+d.k].qtd=Math.max(0.01,num(v));save();drawCmd()},
  obs(v,d){curCmd().itens[+d.k].obs=v;save()},
@@ -605,7 +609,7 @@ setInterval(()=>{if($('#mb').hidden&&['painel','salao','cozinha','delivery'].inc
 /* ===== Controle de acesso: login, autorização, usuários ===== */
 function guard(acao,fn){if(!acao||can(acao))fn();else askAuth(acao,fn)}
 function askAuth(acao,fn){askAuth.fn=fn;askAuth.a=acao;$('#cfb').innerHTML=`<h3>Autorização necessária</h3><p>Para ${esc(ACOES[acao]||acao)}, peça a um gerente ou ao proprietário que digite o PIN.</p><label>PIN de quem autoriza<input id="apin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label><p id="amsg" class="muted"></p><div class="row"><button class="btn pri" data-act="authok">Autorizar</button><button class="btn" data-act="cfno">Voltar</button></div>`;$('#cf').hidden=false;setTimeout(()=>{const i=$('#apin');i&&i.focus()},0)}
-function showLogin(){const us=S.users.filter(u=>u.ativo);if(!ui.loginSel||!us.find(u=>u.id===ui.loginSel))ui.loginSel=us[0]&&us[0].id;
+function showLogin(){if(CLOUD()){showCloudLogin();return}const us=S.users.filter(u=>u.ativo);if(!ui.loginSel||!us.find(u=>u.id===ui.loginSel))ui.loginSel=us[0]&&us[0].id;
  $('#mb').hidden=true;$('#cf').hidden=true;
  $('#login').innerHTML=`<div class="md" style="margin-top:8vh;width:min(440px,100%)"><h1>Mesa Pronta</h1><p class="muted">${esc(S.cfg.nome)}</p><h3 style="margin:14px 0 6px">Quem está usando?</h3><div class="row">${us.map(u=>`<button class="btn ${u.id===ui.loginSel?'pri':''}" data-act="lsel" data-id="${u.id}">${esc(u.nome)}</button>`).join('')}</div><label style="margin-top:12px">PIN<input id="lpin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label><div class="row" style="margin-top:12px"><button class="btn pri" data-act="login">Entrar</button></div><p id="lmsg" class="muted" role="status"></p>${S.users.some(u=>u.ativo&&u.pinPadrao)?'<p class="muted">PINs iniciais de demonstração: Proprietário 1234, Gerente 2345, Caixa 3456, Garçom 4567. Troque-os em Usuários e auditoria.</p>':''}</div>`;
  $('#login').hidden=false;setTimeout(()=>{const i=$('#lpin');i&&i.focus()},0)}
@@ -684,7 +688,136 @@ document.addEventListener('keydown',e=>{ui.last=Date.now();
  if(e.key==='Enter'&&e.target.id==='apin'){A.authok();return}
  if(ui.user&&ui.tab==='pdv'&&$('#mb').hidden&&$('#cf').hidden){if(e.key==='F2'){e.preventDefault();const q=$('#pdvq');q&&q.focus()}if(e.key==='F8'){e.preventDefault();A.pdvpay({f:''})}if(e.key==='F9'){e.preventDefault();A.pdvclear()}}});
 setInterval(()=>{if(ui.user&&Date.now()-ui.last>S.cfg.bloqueioMin*60000)A.lock()},15000);
-S=load();save();retryPend();if(ui.user)render();else showLogin();
+/* ===== Modo nuvem (AWS Lambda): login no servidor, sincronização entre dispositivos e fila offline ===== */
+function CLOUD(){return !!(typeof window!=='undefined'&&window.MP_API)}
+const cloud={tok:null,slug:'',tenant:null,cs:0,snap:{},busy:false,timer:null,pt:null,status:'idle',pub:[]};
+const SYNC_ARR=['produtos','insumos','comandas','vendas','delivery','entregadores','notas','contas','producao','movEst','caixaHist','audit'];
+const SYNC_ALL=[...SYNC_ARR,'cfg','caixa'];
+const FISCAL_KEYS=['url','token','provedor'];
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+const canon=v=>Array.isArray(v)?'['+v.map(canon).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}':JSON.stringify(v);
+const ser=(c,d)=>{if(c==='insumos'){const x={...d};delete x.estoque;return canon(x)}return canon(d)};
+const cfgForSync=()=>{const c={...S.cfg};FISCAL_KEYS.forEach(k=>delete c[k]);return c};
+
+async function api(method,path,body,query){
+ let r;const q=query?'?'+new URLSearchParams(query):'';
+ try{r=await fetch(window.MP_API.replace(/\/+$/,'')+path+q,{method,headers:Object.assign({'content-type':'application/json'},cloud.tok?{authorization:'Bearer '+cloud.tok}:{}),body:body?JSON.stringify(body):undefined})}
+ catch(e){const x=new Error('Sem conexão com o servidor.');x.status=0;throw x}
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok){const x=new Error(j.erro||'Erro no servidor ('+r.status+').');x.status=r.status;throw x}
+ return j}
+
+/* estado inicial de um restaurante novo */
+function blankState(nome){return{v:1,seq:1,cfg:{nome:nome||'',cnpj:'',ie:'',uf:'PR',regime:'Simples Nacional',serie:1,proxNum:1,ambiente:'homologacao',csc:'',cscId:'',provedor:'simulado',url:'',token:'',servicoPct:10,taxaEntrega:6,mesas:12,ifoodMerchant:'',bloqueioMin:10},
+ insumos:[],produtos:[],comandas:[],vendas:[],delivery:[],entregadores:[],notas:[],contas:[],caixa:{aberto:false,abertura:0,em:'',movs:[]},caixaHist:[],producao:[],movEst:[],audit:[],users:[]}}
+function catalogOnly(nome){const s=seed();s.cfg.nome=nome;s.cfg.cnpj='';s.cfg.ie='';['vendas','notas','delivery','comandas','contas','producao','movEst','audit','caixaHist','entregadores'].forEach(k=>s[k]=[]);s.caixa={aberto:false,abertura:0,em:'',movs:[]};s.seq=1;s.users=[];return s}
+
+/* cache local (permite operar sem internet) */
+const cacheKey=()=>'mp_cloud_'+cloud.slug;
+function saveCache(){try{localStorage.setItem(cacheKey(),JSON.stringify({S:Object.assign({},S,{users:[]}),snap:cloud.snap,cs:cloud.cs}))}catch(e){ui.storageOk=false}}
+function loadCache(){try{const r=localStorage.getItem(cacheKey());if(r)return JSON.parse(r)}catch(e){}return null}
+function cloudSaved(){if(!cloud.slug)return;saveCache();clearTimeout(cloud.pt);cloud.pt=setTimeout(syncNow,600)}
+
+/* diferenças entre o estado local e o último estado sincronizado */
+function recsOf(c){
+ if(c==='cfg')return[{id:'main',d:cfgForSync()}];
+ if(c==='caixa')return[{id:'main',d:S.caixa}];
+ let arr=S[c]||[];if(c==='comandas')arr=arr.filter(x=>!x.pdv); // carrinho do PDV é local de cada máquina
+ arr.forEach(x=>{if(!x.id)x.id=uid()});return arr.map(x=>({id:x.id,d:x}))}
+function computeDiff(){const changes=[],incs=[];
+ for(const c of SYNC_ALL){const cur=recsOf(c),sn=cloud.snap[c]||(cloud.snap[c]={}),seen=new Set();
+  for(const {id,d} of cur){seen.add(id);const j=ser(c,d),s=sn[id];
+   if(!s)changes.push({c,id,d,_j:j,_est:c==='insumos'?d.estoque:undefined});
+   else{if(s.j!==j)changes.push({c,id,d,_j:j,_est:c==='insumos'?s.est:undefined});if(c==='insumos'&&r3(d.estoque-s.est)!==0)incs.push({c,id,delta:r3(d.estoque-s.est),_est:d.estoque})}}
+  if(c!=='audit'&&c!=='cfg'&&c!=='caixa')for(const id of Object.keys(sn))if(!seen.has(id))changes.push({c,id,del:true})}
+ return{changes,incs}}
+function commit(b){
+ b.changes.forEach(ch=>{const sn=cloud.snap[ch.c]||(cloud.snap[ch.c]={});if(ch.del)delete sn[ch.id];else sn[ch.id]={j:ch._j,est:ch.c==='insumos'?(sn[ch.id]?sn[ch.id].est:ch._est):undefined}});
+ b.incs.forEach(ic=>{const s=cloud.snap.insumos&&cloud.snap.insumos[ic.id];if(s)s.est=r3((s.est||0)+ic.delta)})}
+
+/* aplica o que veio do servidor sem atropelar edições locais ainda não enviadas */
+function applyRecords(recs){let n=0;
+ for(const r of recs){const c=r.c,sn=cloud.snap[c]||(cloud.snap[c]={});
+  if(c==='cfg'||c==='caixa'){if(r.del||!r.d)continue;const loc=c==='cfg'?cfgForSync():S.caixa,s=sn.main;if(s&&s.j!==ser(c,loc))continue;if(c==='cfg')Object.assign(S.cfg,r.d);else S.caixa=r.d;const j=ser(c,r.d);if(!s||s.j!==j)n++;sn.main={j};continue}
+  const arr=S[c];if(!arr)continue;const i=arr.findIndex(x=>x.id===r.id);
+  if(r.del){if(i>=0){arr.splice(i,1);n++}delete sn[r.id];continue}
+  if(i<0){if(sn[r.id])continue;arr.push(r.d);sn[r.id]={j:ser(c,r.d),est:c==='insumos'?r.d.estoque:undefined};n++;continue}
+  const loc=arr[i],s=sn[r.id];
+  if(c==='insumos'){const pend=s?r3(loc.estoque-s.est):0,dirty=s&&s.j!==ser(c,loc),j=ser(c,r.d);
+   if(!dirty){if(!s||s.j!==j||s.est!==r.d.estoque||pend)n++;arr[i]=Object.assign({},r.d);sn[r.id]={j,est:r.d.estoque}}else sn[r.id]={j:s.j,est:r.d.estoque};
+   arr[i].estoque=r3(r.d.estoque+pend)}
+  else{if(s&&s.j!==ser(c,loc))continue;const j=ser(c,r.d);if(!s||s.j!==j)n++;arr[i]=r.d;sn[r.id]={j}}}
+ return n}
+
+function cloudStatusText(){return({ok:'Sincronizado',sync:'Sincronizando…',off:'Sem conexão: alterações guardadas neste computador',err:'Falha ao sincronizar, nova tentativa em instantes',idle:''})[cloud.status]||''}
+function setSync(s){cloud.status=s;const e=$('#syncst');if(e)e.textContent=cloudStatusText()}
+function softRender(){if(!ui.user)return;if($('#mb').hidden&&$('#cf').hidden&&!(document.activeElement&&document.activeElement.matches&&document.activeElement.matches('input,select,textarea')))render();else ui.stale=true}
+
+async function syncNow(){
+ if(!CLOUD()||!cloud.tok||cloud.busy)return;cloud.busy=true;let changed=0;
+ try{
+  setSync('sync');
+  for(;;){const d=computeDiff();if(!d.changes.length&&!d.incs.length)break;
+   const all=[...d.changes.map(x=>({t:'c',x})),...d.incs.map(x=>({t:'i',x}))].slice(0,150);
+   const b={changes:all.filter(a=>a.t==='c').map(a=>a.x),incs:all.filter(a=>a.t==='i').map(a=>a.x)};
+   await api('POST','/sync',{changes:b.changes.map(({c,id,d,del})=>({c,id,d,del})),incs:b.incs.map(({c,id,delta})=>({c,id,delta}))});commit(b)}
+  let cur=Math.max(0,cloud.cs-50);
+  for(;;){const j=await api('GET','/sync',null,{since:String(cur)});changed+=applyRecords(j.records);cloud.cs=Math.max(cloud.cs,j.cs);cur=j.cs;if(!j.more)break}
+  setSync('ok');saveCache();
+  if(S.notas.some(n=>n.status==='pendente')){await retryPend()}
+ }catch(e){
+  if(e.status===401){setSync('idle');toast('Sessão expirada. Entre novamente.');A.lock()}
+  else setSync(e.status===0?'off':'err')
+ }finally{cloud.busy=false;if(changed)softRender()}}
+function startSync(){clearInterval(cloud.timer);cloud.timer=setInterval(syncNow,4000)}
+function stopSync(){clearInterval(cloud.timer);clearTimeout(cloud.pt);cloud.tok=null;cloud.status='idle'}
+
+async function refreshUsers(){try{S.users=(await api('GET','/users')).users}catch(e){}}
+async function refreshFiscal(){try{const f=(await api('GET','/fiscal')).fiscal;S.cfg.provedor=f.provedor;S.cfg.url=f.url;S.cfg.token=''}catch(e){}}
+async function cloudEnter(r,o){
+ cloud.tok=r.token;cloud.tenant=r.tenant;cloud.slug=r.tenant.slug;lsSet('mp_last_slug',cloud.slug);
+ const c=loadCache();
+ if(c&&c.S){S=c.S;cloud.snap=c.snap||{};cloud.cs=c.cs||0}
+ else{cloud.snap={};cloud.cs=0;S=(o&&o.demo)?catalogOnly(r.tenant.nome):blankState(r.tenant.nome)}
+ S=migra(S);S.users=[];ui.user=r.user;ui.last=Date.now();ui.tab=PERFIS[r.user.perfil].tabs==='*'?'painel':PERFIS[r.user.perfil].tabs[0];
+ await refreshUsers();if(r.user.perfil==='dono')await refreshFiscal();
+ logA('Login',PERFIS[r.user.perfil].nome);saveCache();$('#login').hidden=true;render();startSync();syncNow()}
+
+/* ===== Telas de acesso na nuvem ===== */
+function showCloudLogin(msg){$('#mb').hidden=true;$('#cf').hidden=true;
+ $('#login').innerHTML=`<div class="md" style="margin-top:8vh;width:min(460px,100%)"><h1>Mesa Pronta</h1><p class="muted">Acesse o seu restaurante</p><label style="margin-top:12px">Código do restaurante<input id="cl_slug" value="${esc(cloud.slug||lsGet('mp_last_slug')||'')}" autocomplete="off" placeholder="ex.: sabor-da-casa"></label><div class="row" style="margin-top:12px"><button class="btn pri" data-act="cl_users">Continuar</button><button class="btn" data-act="cl_signupform">Criar restaurante</button></div><p id="lmsg" class="muted" role="status">${esc(msg||'')}</p></div>`;
+ $('#login').hidden=false;setTimeout(()=>{const i=$('#cl_slug');i&&i.focus()},0)}
+function drawCloudPin(msg){const us=cloud.pub;
+ $('#login').innerHTML=`<div class="md" style="margin-top:8vh;width:min(460px,100%)"><h1>${esc(cloud.restaurante||'Mesa Pronta')}</h1><p class="muted">Código: ${esc(cloud.slug)}</p><h3 style="margin:14px 0 6px">Quem está usando?</h3><div class="row">${us.map(u=>`<button class="btn ${u.id===ui.loginSel?'pri':''}" data-act="lsel" data-id="${u.id}">${esc(u.nome)}</button>`).join('')}</div><label style="margin-top:12px">PIN<input id="lpin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label><div class="row" style="margin-top:12px"><button class="btn pri" data-act="login">Entrar</button><button class="btn" data-act="cl_back">Trocar restaurante</button></div><p id="lmsg" class="muted" role="status">${esc(msg||'')}</p></div>`;
+ setTimeout(()=>{const i=$('#lpin');i&&i.focus()},0)}
+function drawSignup(msg){
+ $('#login').innerHTML=`<div class="md" style="margin-top:6vh;width:min(480px,100%)"><h1>Criar restaurante</h1><div class="form" style="margin-top:10px">${field('Nome do restaurante','su_rest','')}${field('Seu nome','su_nome','')}${field('E-mail','su_email','','type="email"')}${field('PIN (4 a 6 números)','su_pin','','type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"')}</div><label class="ck" style="margin-top:10px"><input type="checkbox" id="su_demo" checked> Começar com cardápio e insumos de exemplo</label><div class="row" style="margin-top:12px"><button class="btn pri" data-act="cl_signup">Criar e entrar</button><button class="btn" data-act="cl_back">Voltar</button></div><p id="lmsg" class="muted" role="status">${esc(msg||'')}</p></div>`}
+
+const _A={lsel:A.lsel,login:A.login,lock:A.lock,authok:A.authok,mypinsave:A.mypinsave,usersave:A.usersave,zerar:A.zerar,resetall:A.resetall,restaurar:A.restaurar,tab:A.tab};
+Object.assign(A,{
+ async cl_users(){const slug=$('#cl_slug').value.trim();if(!slug)return lmsg('Informe o código do restaurante.');lmsg('Procurando…');
+  try{const r=await api('GET','/public/users',null,{slug});cloud.slug=slug.toLowerCase();cloud.restaurante=r.restaurante;cloud.pub=r.users;ui.loginSel=r.users[0]&&r.users[0].id;drawCloudPin()}catch(e){lmsg(e.message)}},
+ cl_signupform(){drawSignup()},
+ cl_back(){cloud.slug='';showCloudLogin()},
+ async cl_signup(){const b={restaurante:$('#su_rest').value,nome:$('#su_nome').value,email:$('#su_email').value,pin:$('#su_pin').value};lmsg('Criando…');
+  try{const r=await api('POST','/signup',b);await cloudEnter(r,{demo:$('#su_demo').checked})}catch(e){lmsg(e.message)}},
+ lsel(d){if(!CLOUD())return _A.lsel(d);ui.loginSel=d.id;drawCloudPin()},
+ async login(){if(!CLOUD())return _A.login();const pin=$('#lpin').value;lmsg('Entrando…');
+  try{const r=await api('POST','/login',{slug:cloud.slug,userId:ui.loginSel,pin});await cloudEnter(r)}catch(e){lmsg(e.message);const i=$('#lpin');if(i){i.value='';i.focus()}}},
+ lock(){if(!CLOUD())return _A.lock();if(ui.user)logA('Bloqueio','sessão encerrada');saveCache();stopSync();ui.user=null;cloud.pub=cloud.pub||[];showCloudLogin()},
+ async authok(){if(!CLOUD())return _A.authok();try{const r=await api('POST','/authorize',{acao:askAuth.a,pin:$('#apin').value});logA('Autorizado por '+r.nome,ACOES[askAuth.a]||askAuth.a);$('#cf').hidden=true;const f=askAuth.fn;askAuth.fn=null;f&&f()}catch(e){const m=$('#amsg');if(m)m.textContent=e.status===0?'A autorização precisa de conexão com o servidor.':e.message;const i=$('#apin');if(i)i.value=''}},
+ async mypinsave(){if(!CLOUD())return _A.mypinsave();try{await api('POST','/users/pin',{atual:$('#mp_a').value,novo:$('#mp_n').value});logA('PIN alterado',ui.user.nome);hideModal();toast('PIN alterado.')}catch(e){toast(e.message)}},
+ async usersave(){if(!CLOUD())return _A.usersave();const e=ui.eu;
+  try{await api('POST','/users',{id:e.id,nome:$('#u_nome').value,perfil:$('#u_perfil').value,pin:$('#u_pin').value,ativo:$('#u_at').checked});logA(e.id?'Usuário alterado':'Usuário criado',$('#u_nome').value);await refreshUsers();ui.eu=null;hideModal();toast('Usuário salvo.')}catch(x){toast(x.message)}},
+ zerar(){if(!CLOUD())return _A.zerar();toast('No modo nuvem os dados do restaurante não podem ser apagados por aqui.')},
+ resetall(){if(!CLOUD())return _A.resetall();toast('Indisponível no modo nuvem.')},
+ restaurar(){if(!CLOUD())return _A.restaurar();toast('Indisponível no modo nuvem.')},
+ tab(d){_A.tab(d);if(CLOUD()&&d.k==='acesso')refreshUsers().then(()=>{if(ui.tab==='acesso')render()})}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='cl_slug')A.cl_users()});
+window.addEventListener('online',()=>{if(CLOUD())syncNow()});
+if(CLOUD()){S=blankState('');showLogin()}else{S=load();save();retryPend();if(ui.user)render();else showLogin()}
 
 </script>
 </body>
