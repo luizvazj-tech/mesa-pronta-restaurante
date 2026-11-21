@@ -148,7 +148,7 @@ const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
 const LS='mesa_pronta_v1';
 let S,ui={user:null,pdv:null,pdvNfce:false,eu:null,fails:0,lockUntil:0,last:Date.now(),tab:'painel',cat:'Todos',q:'',cmd:null,pay:null,ed:null,dn:null,relPer:7,chat:[],storageOk:true,iaq:''};
 function testStorage(){try{localStorage.setItem('__t','1');localStorage.removeItem('__t');return true}catch(e){return false}}
-function migra(o){o.users=o.users||defaultUsers();o.audit=o.audit||[];o.cfg.bloqueioMin=o.cfg.bloqueioMin||10;const used=new Set();o.produtos.forEach((p,i)=>{if(!p.cod||used.has(p.cod)){let n=101+i;while(used.has(String(n)))n++;p.cod=String(n)}used.add(p.cod)});return o}
+function migra(o){o.users=o.users||defaultUsers();o.audit=o.audit||[];o.gorjEquipe=o.gorjEquipe||[];o.gorjLanc=o.gorjLanc||[];o.gorjFech=o.gorjFech||[];o.cfg.gorj=o.cfg.gorj||gorjDef(o.cfg.regime);o.cfg.fisc=o.cfg.fisc||fiscDef();o.cfg.bloqueioMin=o.cfg.bloqueioMin||10;const used=new Set();o.produtos.forEach((p,i)=>{if(!p.cod||used.has(p.cod)){let n=101+i;while(used.has(String(n)))n++;p.cod=String(n)}used.add(p.cod)});return o}
 function load(){ui.storageOk=testStorage();if(ui.storageOk){try{const r=localStorage.getItem(LS);if(r){const o=JSON.parse(r);if(o&&o.v===1)return migra(o)}}catch(e){}}return seed()}
 function save(){if(CLOUD()){cloudSaved();return}if(!ui.storageOk)return;try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){ui.storageOk=false}}
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200)}
@@ -169,7 +169,7 @@ const PERFIS={dono:{nome:'Proprietário',tabs:'*',can:'*'},
  cozinha:{nome:'Cozinha',tabs:['cozinha','estoque','producao'],can:['ajusteest']}};
 const ACOES={desconto:'dar desconto',cancelar:'cancelar item, comanda ou pedido',sangria:'registrar sangria',cancnota:'cancelar NFC-e',fechacaixa:'fechar o caixa',contas:'ver contas a pagar e receber',ajusteest:'ajustar estoque'};
 const PERM_TXT={desconto:'Dar desconto',cancelar:'Cancelar itens e pedidos',sangria:'Sangria',cancnota:'Cancelar NFC-e',contas:'Ver contas a pagar',ajusteest:'Perdas e contagem de estoque',usuarios:'Gerenciar usuários'};
-const canP=(perfil,a)=>{const p=PERFIS[perfil];if(!p)return false;if(a==='usuarios')return perfil==='dono';return p.can==='*'||p.can.includes(a)};
+const canP=(perfil,a)=>{const p=PERFIS[perfil];if(!p)return false;if(a==='usuarios'||a==='regragorj'||a==='padraofisc')return perfil==='dono';return p.can==='*'||p.can.includes(a)};
 const can=a=>!!ui.user&&canP(ui.user.perfil,a);
 const tabOk=t=>!!ui.user&&(PERFIS[ui.user.perfil].tabs==='*'||PERFIS[ui.user.perfil].tabs.includes(t));
 function mkUser(nome,perfil,pin){const id=uid();return{id,nome,perfil,pinHash:hashPin(id,pin),ativo:true,pinPadrao:true,ultimo:''}}
@@ -204,7 +204,7 @@ function mkNota(v,doc,sim){
 function payloadNota(nota){const v=S.vendas.find(x=>x.id===nota.vendaId),c=S.cfg;
  return{ambiente:c.ambiente==='producao'?1:2,modelo:65,serie:nota.serie,numero:nota.numero,emitente:{cnpj:cnpjLimpo(c.cnpj),ie:c.ie,uf:c.uf,regime:c.regime,csc_id:c.cscId},
  destinatario:nota.doc?{documento:nota.doc}:null,
- itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,ncm:p.ncm,cfop:p.cfop,csosn:p.csosn,unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.preco,valor_total:r2(i.qtd*i.preco)}}),
+ itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,...fiscItem(p),unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.preco,valor_total:r2(i.qtd*i.preco)}}),
  pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:r2(v.serv+v.taxa),total:v.total}}
 async function transmitir(nota){
  const c=S.cfg;
@@ -246,6 +246,8 @@ function seed(){
  contas:[{id:uid(),tipo:'pagar',desc:'Energia elétrica',valor:890,venc:iso(-1),pago:false},{id:uid(),tipo:'pagar',desc:'Fornecedor de hortifrúti',valor:1280,venc:iso(2),pago:false},{id:uid(),tipo:'pagar',desc:'Aluguel',valor:4500,venc:iso(5),pago:false},{id:uid(),tipo:'receber',desc:'Operadora de vale-refeição',valor:1650,venc:iso(4),pago:false}],
  caixa:{aberto:true,abertura:200,em:new Date().toISOString(),movs:[],op:'Proprietário'},caixaHist:[],producao:[],movEst:[],audit:[],users:defaultUsers()};
  produtos.forEach((p,i)=>p.cod=String(101+i));
+ s.cfg.gorj=gorjDef(s.cfg.regime);s.cfg.fisc=fiscDef();produtos.forEach(p=>{p.pf=(p.id==='p8'||p.id==='p10')?'pf_bebida_st':p.id==='p9'?'pf_bebida_prep':'pf_refeicao'});
+ s.gorjEquipe=[['Garçom (exemplo 1)','f1'],['Garçom (exemplo 2)','f1'],['Cozinheiro (exemplo)','f3'],['Caixa (exemplo)','f4']].map(([nome,funcao])=>({id:uid(),nome,funcao,ativo:true}));s.gorjLanc=[];s.gorjFech=[];
  S=s;
  let sv=7;const rnd=()=>{sv=(sv*16807)%2147483647;return sv/2147483647};
  const nonkg=produtos.filter(p=>p.tipo==='un');
@@ -460,6 +462,7 @@ async function confirmPay(){autoFix();const p=ui.pay,k=payCalc();
  if(k.desc>0&&!can('desconto')&&!p.authDesc)return askAuth('desconto',()=>{p.authDesc=true;confirmPay()});
  if(k.falta>0.005)return toast('Ainda falta '+money(k.falta));
  if(p.emitir&&p.doc&&!(validaCPF(p.doc)||validaCNPJ(p.doc)))return toast('CPF ou CNPJ inválido.');
+ if(p.emitir){const fp=fiscPend(refSrc(p.ref).itens);if(fp.length)return toast('NFC-e bloqueada: padrão fiscal sem validação do contador ou incompleto ('+fp.join('; ')+').')}
  let troco=r2(-k.falta),pags=p.pags.map(g=>({...g}));
  if(troco>0.005){const din=soma(pags.filter(g=>g.forma==='Dinheiro'),g=>g.valor);if(din<troco)return toast('O troco só pode sair de pagamento em dinheiro.');let rest=troco;pags.forEach(g=>{if(g.forma==='Dinheiro'&&rest>0){const t=Math.min(g.valor,rest);g.valor=r2(g.valor-t);rest=r2(rest-t)}});pags=pags.filter(g=>g.valor>0)}else troco=0;
  const src=k.src,del=p.ref.kind==='del';
@@ -481,11 +484,11 @@ function drawDn(){const d=ui.dn;showModal(mh('Novo pedido de delivery')+`<div cl
 /* ===== Editor de produto / insumo ===== */
 function fichaHtml(lines,self){return`<h3 style="margin-top:10px">${self==='p'?'Ficha técnica':'Receita do preparo'}</h3>`+lines.map((l,i)=>`<div class="row" style="margin:4px 0"><select id="el_i${i}" style="flex:1">${S.insumos.filter(x=>x.id!==ui.ed.id).map(x=>`<option value="${x.id}" ${x.id===l.id?'selected':''}>${esc(x.nome)} (${x.un})</option>`).join('')}</select><input id="el_q${i}" value="${String(l.qtd).replace('.',',')}" style="width:90px" inputmode="decimal"><button class="btn sm bad" data-act="edrm" data-k="${i}">x</button></div>`).join('')+`<button class="btn sm" data-act="edadd">Adicionar insumo</button>`}
 function syncEd(){const e=ui.ed;if(!e||!$('#ed_nome'))return;const d=e.d;d.nome=$('#ed_nome').value;
- if(e.kind==='prod'){d.cod=$('#ed_cod').value.trim();d.cat=$('#ed_cat').value;d.tipo=$('#ed_tipo').value;d.preco=num($('#ed_preco').value);d.custoManual=num($('#ed_cm').value);d.ncm=$('#ed_ncm').value;d.cfop=$('#ed_cfop').value;d.csosn=$('#ed_csosn').value}
+ if(e.kind==='prod'){d.cod=$('#ed_cod').value.trim();d.cat=$('#ed_cat').value;d.tipo=$('#ed_tipo').value;d.preco=num($('#ed_preco').value);d.custoManual=num($('#ed_cm').value);d.ncm=$('#ed_ncm').value;d.cfop=$('#ed_cfop').value;d.csosn=$('#ed_csosn').value;d.pf=$('#ed_pf')?$('#ed_pf').value:(d.pf||'')}
  else{d.un=$('#ed_un').value;d.min=num($('#ed_min').value);d.custo=num($('#ed_custo').value);if($('#ed_est'))d.estoque=num($('#ed_est').value);d.prep=$('#ed_prep').checked;d.rend=num($('#ed_rend')?.value||d.rend||1)}
  const L=e.kind==='prod'?d.ficha:d.receita;(L||[]).forEach((l,i)=>{if($('#el_i'+i)){l.id=$('#el_i'+i).value;l.qtd=num($('#el_q'+i).value)}})}
 function drawEd(){const e=ui.ed,d=e.d;
- if(e.kind==='prod')showModal(mh(e.id?'Editar produto':'Novo produto')+`<div class="form">${field('Nome','ed_nome',d.nome)}${field('Código / código de barras','ed_cod',d.cod||'','inputmode="numeric"')}${field('Categoria','ed_cat',d.cat,'list="cats"')}<datalist id="cats">${[...new Set(S.produtos.map(p=>p.cat))].map(c=>`<option>${esc(c)}</option>`).join('')}</datalist>${sel('Venda por','ed_tipo',[['un','Unidade'],['kg','Quilo (peso)']],d.tipo)}${field('Preço (R$)','ed_preco',String(d.preco).replace('.',','),'inputmode="decimal"')}${field('Custo sem ficha (R$)','ed_cm',String(d.custoManual||0).replace('.',','),'inputmode="decimal"')}${field('NCM','ed_ncm',d.ncm)}${field('CFOP','ed_cfop',d.cfop)}${field('CSOSN/CST','ed_csosn',d.csosn)}</div>${fichaHtml(d.ficha,'p')}<p class="muted">Custo calculado pela ficha: <b>${money(custoProd(d))}</b>. Sem ficha, vale o custo informado.</p><div class="row" style="margin-top:10px"><button class="btn pri" data-act="edsave">Salvar</button>${e.id?'<button class="btn bad" data-act="eddel">Excluir</button>':''}</div>`);
+ if(e.kind==='prod')showModal(mh(e.id?'Editar produto':'Novo produto')+`<div class="form">${field('Nome','ed_nome',d.nome)}${field('Código / código de barras','ed_cod',d.cod||'','inputmode="numeric"')}${field('Categoria','ed_cat',d.cat,'list="cats"')}<datalist id="cats">${[...new Set(S.produtos.map(p=>p.cat))].map(c=>`<option>${esc(c)}</option>`).join('')}</datalist>${sel('Venda por','ed_tipo',[['un','Unidade'],['kg','Quilo (peso)']],d.tipo)}${field('Preço (R$)','ed_preco',String(d.preco).replace('.',','),'inputmode="decimal"')}${field('Custo sem ficha (R$)','ed_cm',String(d.custoManual||0).replace('.',','),'inputmode="decimal"')}${sel('Padrão fiscal','ed_pf',[['','Manual (CFOP e CSOSN abaixo)'],...S.cfg.fisc.perfis.map(p=>[p.id,p.nome+(p.status==='validado'?'':' (não validado)')])],d.pf||'')}${field('NCM','ed_ncm',d.ncm)}${field('CFOP (se manual)','ed_cfop',d.cfop)}${field('CSOSN/CST (se manual)','ed_csosn',d.csosn)}</div>${fichaHtml(d.ficha,'p')}<p class="muted">Custo calculado pela ficha: <b>${money(custoProd(d))}</b>. Sem ficha, vale o custo informado.</p><div class="row" style="margin-top:10px"><button class="btn pri" data-act="edsave">Salvar</button>${e.id?'<button class="btn bad" data-act="eddel">Excluir</button>':''}</div>`);
  else showModal(mh(e.id?'Editar insumo':'Novo insumo')+`<div class="form">${field('Nome','ed_nome',d.nome)}${sel('Unidade','ed_un',['kg','l','un','g','ml'],d.un)}${e.id?'':field('Estoque inicial','ed_est',d.estoque,'inputmode="decimal"')}${field('Estoque mínimo','ed_min',d.min,'inputmode="decimal"')}${field('Custo unitário (R$)','ed_custo',String(d.custo).replace('.',','),'inputmode="decimal"')}</div><label class="ck" style="margin-top:10px"><input type="checkbox" id="ed_prep" data-chg="edprep" ${d.prep?'checked':''}> É um preparo (tem receita e é produzido na cozinha)</label>${d.prep?`<div class="form" style="margin-top:8px">${field('Rendimento por lote','ed_rend',d.rend||1,'inputmode="decimal"')}</div>${fichaHtml(d.receita,'i')}`:''}<div class="row" style="margin-top:10px"><button class="btn pri" data-act="edsave">Salvar</button>${e.id?'<button class="btn bad" data-act="eddel">Excluir</button>':''}</div>`)}
 
 /* ===== Assistente ===== */
@@ -580,7 +583,7 @@ const A={
  cancnota(d){guard('cancnota',()=>showModal(mh('Cancelar NFC-e')+`<label>Justificativa (mínimo de 15 caracteres)<input id="cj" placeholder="Ex.: erro de digitação no valor da venda"></label><div class="row" style="margin-top:10px"><button class="btn bad" data-act="cancok" data-id="${d.id}">Cancelar nota</button></div>`))},
  cancok(d){const j=$('#cj').value.trim();if(j.length<15)return toast('A justificativa precisa ter ao menos 15 caracteres.');const n=S.notas.find(x=>x.id===d.id);n.status='cancelada';n.msg='Cancelada: '+j;logA('NFC-e cancelada','nº '+n.numero+' · '+j);save();hideModal();toast('Nota cancelada (simulação local).')},
  emitirvenda(d){showModal(mh('Emitir NFC-e')+`${field('CPF ou CNPJ na nota (opcional)','ev_doc','','maxlength="18" autocapitalize="characters" style="text-transform:uppercase" placeholder="CPF ou CNPJ, com ou sem pontuação"')}<div class="row" style="margin-top:10px"><button class="btn pri" data-act="evok" data-id="${d.id}">Emitir</button></div>`)},
- async evok(d){const doc=$('#ev_doc').value;if(doc&&!(validaCPF(doc)||validaCNPJ(doc)))return toast('CPF ou CNPJ inválido.');const v=S.vendas.find(x=>x.id===d.id);const n=mkNota(v,doc,false);await transmitir(n);logA('NFC-e emitida','nº '+n.numero+' · '+n.status);save();hideModal();toast('NFC-e '+n.status+'.')},
+ async evok(d){const doc=$('#ev_doc').value;if(doc&&!(validaCPF(doc)||validaCNPJ(doc)))return toast('CPF ou CNPJ inválido.');const v=S.vendas.find(x=>x.id===d.id);const fp=fiscPend(v.itens);if(fp.length)return toast('NFC-e bloqueada: padrão fiscal sem validação do contador ou incompleto ('+fp.join('; ')+').');const n=mkNota(v,doc,false);await transmitir(n);logA('NFC-e emitida','nº '+n.numero+' · '+n.status);save();hideModal();toast('NFC-e '+n.status+'.')},
  per(d){ui.relPer=+d.n;render()},
  ask(d){ui.chat.push({r:'u',t:d.q},{r:'a',t:answer(d.q)});render()},
  askin(){const q=$('#iaq').value.trim();if(!q)return;ui.iaq='';ui.chat.push({r:'u',t:q},{r:'a',t:answer(q)});render();$('#iaq')?.focus()},
@@ -696,7 +699,7 @@ setInterval(()=>{if(ui.user&&Date.now()-ui.last>S.cfg.bloqueioMin*60000)A.lock()
 /* ===== Modo nuvem (AWS Lambda): login no servidor, sincronização entre dispositivos e fila offline ===== */
 function CLOUD(){return !!(typeof window!=='undefined'&&window.MP_API)}
 const cloud={tok:null,slug:'',tenant:null,cs:0,snap:{},busy:false,timer:null,pt:null,status:'idle',pub:[]};
-const SYNC_ARR=['produtos','insumos','comandas','vendas','delivery','entregadores','notas','contas','producao','movEst','caixaHist','audit'];
+const SYNC_ARR=['produtos','insumos','comandas','vendas','delivery','entregadores','notas','contas','producao','movEst','caixaHist','audit','gorjEquipe','gorjLanc','gorjFech'];
 const SYNC_ALL=[...SYNC_ARR,'cfg','caixa'];
 const FISCAL_KEYS=['url','token','provedor'];
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
@@ -715,8 +718,8 @@ async function api(method,path,body,query){
 
 /* estado inicial de um restaurante novo */
 function blankState(nome){return{v:1,seq:1,cfg:{nome:nome||'',cnpj:'',ie:'',uf:'PR',regime:'Simples Nacional',serie:1,proxNum:1,ambiente:'homologacao',csc:'',cscId:'',provedor:'simulado',url:'',token:'',servicoPct:10,taxaEntrega:6,mesas:12,ifoodMerchant:'',bloqueioMin:10},
- insumos:[],produtos:[],comandas:[],vendas:[],delivery:[],entregadores:[],notas:[],contas:[],caixa:{aberto:false,abertura:0,em:'',movs:[]},caixaHist:[],producao:[],movEst:[],audit:[],users:[]}}
-function catalogOnly(nome){const s=seed();s.cfg.nome=nome;s.cfg.cnpj='';s.cfg.ie='';['vendas','notas','delivery','comandas','contas','producao','movEst','audit','caixaHist','entregadores'].forEach(k=>s[k]=[]);s.caixa={aberto:false,abertura:0,em:'',movs:[]};s.seq=1;s.users=[];return s}
+ insumos:[],produtos:[],comandas:[],vendas:[],delivery:[],entregadores:[],notas:[],contas:[],caixa:{aberto:false,abertura:0,em:'',movs:[]},caixaHist:[],producao:[],movEst:[],audit:[],gorjEquipe:[],gorjLanc:[],gorjFech:[],users:[]}}
+function catalogOnly(nome){const s=seed();s.cfg.nome=nome;s.cfg.cnpj='';s.cfg.ie='';['vendas','notas','delivery','comandas','contas','producao','movEst','audit','caixaHist','entregadores','gorjEquipe','gorjLanc','gorjFech'].forEach(k=>s[k]=[]);s.caixa={aberto:false,abertura:0,em:'',movs:[]};s.seq=1;s.users=[];return s}
 
 /* cache local (permite operar sem internet) */
 const cacheKey=()=>'mp_cloud_'+cloud.slug;
@@ -822,6 +825,161 @@ Object.assign(A,{
 });
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='cl_slug')A.cl_users()});
 window.addEventListener('online',()=>{if(CLOUD())syncNow()});
+/* ===== Gorjeta (rateio por regra coletiva) e padrões fiscais de bebidas ===== */
+const GJ_CAP=r=>/simples|mei/i.test(r||'')?20:33; /* CLT art. 457, §6º, I e II (Lei 13.419/2017): até 20% (regime federal diferenciado) ou até 33% */
+function gorjDef(regime){return{ativo:true,fonte:'convencao',instrumento:'',registro:'',sindicato:'',vigIni:'',vigFim:'',retPct:GJ_CAP(regime),criterio:'pontos',
+ funcoes:[{id:'f1',nome:'Garçom',pontos:10},{id:'f2',nome:'Auxiliar de salão / cumim',pontos:6},{id:'f3',nome:'Cozinha',pontos:8},{id:'f4',nome:'Caixa',pontos:6},{id:'f5',nome:'Gerência',pontos:0}],
+ comissao:false,comissaoMembros:'',obs:''}}
+const PF=(id,nome,o)=>Object.assign({id,nome,ncmRef:'',cest:'',cfop:'',csosn:'',cstPis:'',cstCofins:'',origem:'0',st:'revisar',mono:'revisar',obs:'',status:'sugerido',valPor:'',valCrc:'',valData:''},o);
+function fiscDef(){return{validacao:{status:'pendente',contador:'',crc:'',data:'',obs:'',hist:[]},perfis:[
+ PF('pf_refeicao','Refeições e pratos preparados (produção própria)',{ncmRef:'2106.90.90',cfop:'5101',csosn:'102',cstPis:'49',cstCofins:'49',st:'nao',mono:'nao',obs:'Produção no estabelecimento. Confirmar com o contador o tratamento de ICMS (fornecimento de alimentação) e o enquadramento no Simples Nacional.'}),
+ PF('pf_bebida_st','Água, refrigerantes e sucos industrializados (revenda)',{ncmRef:'2201.10.00; 2202.10.00',cfop:'5405',csosn:'500',cstPis:'04',cstCofins:'04',st:'sim',mono:'sim',obs:'Revenda com ICMS-ST já recolhido na origem (CFOP 5405, CSOSN 500) e PIS/COFINS monofásico (CST 04). Preencher o CEST conforme Convênio ICMS 142/2018 e validar a lista de NCM por UF.'}),
+ PF('pf_cerveja','Cerveja e chope (revenda)',{ncmRef:'2203.00.00',cfop:'5405',csosn:'500',st:'sim',mono:'revisar',obs:'ICMS-ST usual. PIS/COFINS: há divergência de entendimento sobre o tratamento do varejista (monofásico × alíquota zero) e o Simples Nacional não aproveita alíquota zero. CST de PIS/COFINS deixado em branco até definição do contador.'}),
+ PF('pf_alcool','Destilados, vinhos e demais bebidas alcoólicas (revenda)',{ncmRef:'2204; 2208',cfop:'5405',csosn:'500',cstPis:'49',cstCofins:'49',st:'revisar',mono:'nao',obs:'Monofásico de PIS/COFINS em regra não se aplica a estas bebidas. Verificar se há ICMS-ST na UF para cada NCM; se não houver, usar CFOP 5102 e CSOSN 102.'}),
+ PF('pf_bebida_prep','Sucos, drinks e bebidas preparadas no local',{ncmRef:'2009; 2106.90',cfop:'5101',csosn:'102',cstPis:'49',cstCofins:'49',st:'nao',mono:'nao',obs:'Bebida produzida/preparada no estabelecimento: tratada como produção própria, sem ST nem monofásico.'})]}}
+
+/* ---- Gorjeta ---- */
+const GJ=()=>S.cfg.gorj;
+const gjMesPadrao=()=>{const d=new Date();return{ini:dayKey(new Date(d.getFullYear(),d.getMonth(),1)),fim:dayKey(new Date(d.getFullYear(),d.getMonth()+1,0)),dias:{}}};
+const gjNd=(a,b)=>Math.max(1,Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/864e5)+1);
+function gjCalc(ini,fim,diasMap){
+ const g=GJ(),cap=GJ_CAP(S.cfg.regime),nd=gjNd(ini,fim);
+ const vs=S.vendas.filter(v=>{const k=dayKey(v.data);return k>=ini&&k<=fim});
+ const serv=r2(vs.reduce((a,v)=>a+(v.serv||0),0));
+ const lanc=r2((S.gorjLanc||[]).filter(l=>l.data>=ini&&l.data<=fim).reduce((a,l)=>a+l.valor,0));
+ const total=r2(serv+lanc),ret=r2(total*g.retPct/100),dist=r2(total-ret);
+ const eq=(S.gorjEquipe||[]).filter(m=>m.ativo!==false).map(m=>{const f=g.funcoes.find(x=>x.id===m.funcao)||{nome:'(sem função)',pontos:0};
+  const dias=diasMap&&diasMap[m.id]!=null&&diasMap[m.id]!==''?Math.max(0,Math.min(nd,num(diasMap[m.id]))):nd;
+  const pts=g.criterio==='igual'?(f.pontos>0?1:0):f.pontos;return{id:m.id,nome:m.nome,funcao:f.nome,pontos:pts,dias,peso:pts*dias,valor:0}});
+ const W=eq.reduce((a,e)=>a+e.peso,0);
+ if(W>0){const cents=Math.round(dist*100);let alloc=0;eq.forEach(e=>{e.raw=cents*e.peso/W;e.c=Math.floor(e.raw+1e-9);alloc+=e.c});let resto=cents-alloc;
+  eq.slice().sort((a,b)=>(b.raw-b.c)-(a.raw-a.c)||a.nome.localeCompare(b.nome)).forEach(e=>{if(resto>0&&e.peso>0){e.c++;resto--}});eq.forEach(e=>e.valor=e.c/100)}
+ return{ini,fim,nd,vendas:vs.length,serv,lanc,total,ret,dist,eq,W,cap}}
+function gjAlertas(){const g=GJ(),a=[],hoje=dayKey(Date.now()),cap=GJ_CAP(S.cfg.regime);
+ if(!g.instrumento)a.push(['bad','Instrumento não informado: registre a convenção coletiva (CCT) ou o acordo coletivo (ACT) que fixa os critérios de custeio e de rateio. Na omissão, os critérios e a retenção são definidos em assembleia geral dos trabalhadores (art. 457, §5º, CLT, Lei 13.419/2017).']);
+ if(g.fonte==='assembleia')a.push(['warn','Regra por assembleia: guarde a ata e a lista de presença (art. 612 da CLT, remissão do §5º do art. 457).']);
+ if(g.vigFim&&g.vigFim<hoje)a.push(['bad','A vigência do instrumento informado terminou em '+dmy(g.vigFim+'T00:00:00')+'. Confirme a prorrogação ou a nova convenção do sindicato.']);
+ if(!g.vigIni&&!g.vigFim)a.push(['warn','Vigência do instrumento não informada.']);
+ if(g.retPct>cap)a.push(['bad','A retenção de '+g.retPct+'% excede o limite legal de '+cap+'% para o regime ('+S.cfg.regime+'): art. 457, §6º, '+(cap===20?'I':'II')+', CLT. O fechamento fica bloqueado até a correção.']);
+ if((S.gorjEquipe||[]).filter(m=>m.ativo!==false).length>60&&!g.comissao)a.push(['bad','Mais de 60 empregados: a comissão de empregados para fiscalizar a cobrança e a distribuição é exigida (art. 457, §10, CLT).']);
+ if(!(S.gorjEquipe||[]).length)a.push(['warn','Nenhum empregado cadastrado na equipe do rateio.']);
+ return a}
+function gjDemo(c,titulo){const g=c.regra||GJ();return[S.cfg.nome,'DEMONSTRATIVO DE RATEIO DE GORJETA (taxa de serviço)',titulo||('Período: '+dmy(c.ini+'T00:00:00')+' a '+dmy(c.fim+'T00:00:00')),
+ 'Instrumento: '+(g.instrumento||'não informado')+(g.registro?' · registro '+g.registro:'')+' · critério: '+(g.criterio==='igual'?'partes iguais entre funções com pontuação':'pontos da função × dias trabalhados'),
+ 'Taxa de serviço arrecadada: '+money(c.serv)+' · gorjeta lançada: '+money(c.lanc)+' · total: '+money(c.total),
+ 'Retenção ('+g.retPct+'%) para encargos sociais, previdenciários e trabalhistas: '+money(c.ret)+' · valor a distribuir: '+money(c.dist),'',
+ ...(c.eq||c.itens).map(e=>e.nome+' ('+e.funcao+') — '+e.pontos+' pt × '+e.dias+' dia(s) = '+money(e.valor)),'','Total distribuído: '+money(r2((c.eq||c.itens).reduce((a,e)=>a+e.valor,0)))].join('\n')}
+
+function vGorjeta(){
+ if(!ui.gj)ui.gj=gjMesPadrao();
+ const g=GJ(),ro=!can('regragorj'),dz=ro?' disabled':'',cap=GJ_CAP(S.cfg.regime),r=gjCalc(ui.gj.ini,ui.gj.fim,ui.gj.dias),al=gjAlertas();
+ const hist=(S.gorjFech||[]).slice().sort((a,b)=>b.ini.localeCompare(a.ini));
+ const lim=dayKey(Date.now()-365*864e5),rec=hist.filter(f=>f.fim>=lim),med={};
+ rec.forEach(f=>f.itens.forEach(i=>{(med[i.nome]=med[i.nome]||[]).push(i.valor)}));
+ return head('Gorjeta e rateio','Taxa de serviço rateada entre os empregados conforme a regra coletiva programada abaixo.')+
+ `<div class="banner"><b>Natureza e base normativa.</b> A gorjeta (inclusive a taxa de serviço cobrada na conta) não é receita da empresa: destina-se aos trabalhadores e é distribuída segundo os critérios de custeio e de rateio da convenção ou do acordo coletivo (art. 457, §§3º e 4º, CLT, na redação da Lei 13.419/2017). A retenção para custear encargos é facultada até 20% (regime de tributação federal diferenciado) ou até 33% (demais), desde que prevista em norma coletiva (art. 457, §6º, I e II). Sem norma coletiva, a assembleia geral decide (art. 457, §5º). Este painel apenas executa a regra que o senhor programar: <b>os percentuais, as pontuações e as funções devem reproduzir fielmente a CCT/ACT da categoria</b>, e os valores iniciais são apenas um modelo editável. [VERIFICAR FONTE OFICIAL: numeração dos parágrafos na CLT consolidada e jurisprudência do TST/STF (Tema 1046) sobre retenção fixada em norma coletiva.]</div>`+
+ al.map(([k,t])=>`<div class="banner" style="${k==='bad'?'border-color:#b3261e':''}"><b>${k==='bad'?'Atenção:':'Aviso:'}</b> ${esc(t)}</div>`).join('')+
+ `<div class="grid g4" style="margin-top:12px">${kpi('Taxa de serviço no período',money(r.serv),r.vendas+' vendas')}${kpi('Retenção ('+g.retPct+'%)',money(r.ret),'limite legal '+cap+'%')}${kpi('A distribuir',money(r.dist))}${kpi('Participantes',r.eq.filter(e=>e.peso>0).length,'de '+r.eq.length+' na equipe')}</div>
+ <div class="card" style="margin-top:12px"><h2>Regra coletiva (programação)</h2>${ro?'<p class="muted">Somente o proprietário altera a regra.</p>':''}<div class="form">
+ ${sel('Fonte da regra','g_fonte',[['convencao','Convenção coletiva (CCT)'],['acordo','Acordo coletivo (ACT)'],['assembleia','Assembleia geral (omissão de norma coletiva)']],g.fonte).replace('<select','<select data-chg="grule" data-k="fonte"'+dz)}
+ ${field('Instrumento (título e ano)','g_inst',g.instrumento,'data-chg="grule" data-k="instrumento"'+dz+' placeholder="Ex.: CCT Bares e Restaurantes 2026/2027"')}
+ ${field('Nº de registro (Mediador/MTE) ou ata','g_reg',g.registro,'data-chg="grule" data-k="registro"'+dz)}
+ ${field('Sindicato laboral','g_sind',g.sindicato,'data-chg="grule" data-k="sindicato"'+dz)}
+ <label>Vigência: início<input type="date" value="${esc(g.vigIni)}" data-chg="grule" data-k="vigIni"${dz}></label><label>Vigência: fim<input type="date" value="${esc(g.vigFim)}" data-chg="grule" data-k="vigFim"${dz}></label>
+ ${field('Retenção para encargos (%) — máx. '+cap+'%','g_ret',String(g.retPct).replace('.',','),'data-chg="grule" data-k="retPct" inputmode="decimal"'+dz)}
+ ${sel('Critério de rateio','g_crit',[['pontos','Pontos da função × dias trabalhados'],['igual','Partes iguais (funções com pontuação) × dias']],g.criterio).replace('<select','<select data-chg="grule" data-k="criterio"'+dz)}</div>
+ <label class="ck" style="margin-top:8px"><input type="checkbox" data-chg="grule" data-k="comissao" ${g.comissao?'checked':''}${dz}> Comissão de empregados constituída para fiscalizar a cobrança e a distribuição</label>
+ ${g.comissao?field('Membros da comissão','g_com',g.comissaoMembros,'data-chg="grule" data-k="comissaoMembros"'+dz):''}
+ <h3 style="margin-top:12px">Funções e pontuação</h3><div class="tw"><table><tr><th>Função</th><th class="r">Pontos</th><th></th></tr>${g.funcoes.map((f,i)=>`<tr><td><input value="${esc(f.nome)}" data-chg="gfn" data-i="${i}" data-k="nome"${dz}></td><td class="r"><input value="${String(f.pontos).replace('.',',')}" data-chg="gfn" data-i="${i}" data-k="pontos" inputmode="decimal" style="width:80px;text-align:right"${dz}></td><td>${ro?'':`<button class="btn sm bad" data-act="gfdel" data-i="${i}">x</button>`}</td></tr>`).join('')}</table></div>
+ ${ro?'':'<button class="btn sm" data-act="gfadd" style="margin-top:6px">Adicionar função</button>'}<p class="muted">Função com 0 ponto fica fora do rateio (por exemplo, gerência, se a norma coletiva a excluir).</p></div>
+ <div class="card" style="margin-top:12px"><h2>Equipe do rateio</h2><div class="tw"><table><tr><th>Empregado</th><th>Função</th><th>Ativo</th><th></th></tr>${(S.gorjEquipe||[]).map(m=>`<tr><td>${esc(m.nome)}</td><td><select data-chg="geq" data-id="${m.id}" data-k="funcao">${g.funcoes.map(f=>`<option value="${f.id}" ${f.id===m.funcao?'selected':''}>${esc(f.nome)}</option>`).join('')}</select></td><td><input type="checkbox" data-chg="geq" data-id="${m.id}" data-k="ativo" ${m.ativo!==false?'checked':''}></td><td><button class="btn sm bad" data-act="geqdel" data-id="${m.id}">x</button></td></tr>`).join('')||'<tr><td colspan="4" class="muted">Sem empregados.</td></tr>'}</table></div>
+ <div class="row" style="margin-top:8px"><input id="g_nn" placeholder="Nome do empregado" style="flex:1"><select id="g_nf">${g.funcoes.map(f=>`<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select><button class="btn" data-act="geqadd">Adicionar</button></div></div>
+ <div class="card" style="margin-top:12px"><h2>Rateio do período</h2><div class="form"><label>De<input type="date" value="${esc(ui.gj.ini)}" data-chg="gper" data-k="ini"></label><label>Até<input type="date" value="${esc(ui.gj.fim)}" data-chg="gper" data-k="fim"></label></div>
+ <p class="muted">Taxa de serviço das vendas do período: <b>${money(r.serv)}</b>${r.lanc?` · gorjeta lançada manualmente: <b>${money(r.lanc)}</b>`:''}. O período tem ${r.nd} dia(s); ajuste abaixo os dias efetivamente trabalhados de cada empregado (faltas, folgas, férias).</p>
+ <div class="tw"><table><tr><th>Empregado</th><th>Função</th><th class="r">Pontos</th><th class="r">Dias</th><th class="r">Valor</th></tr>${r.eq.map(e=>`<tr><td>${esc(e.nome)}</td><td>${esc(e.funcao)}</td><td class="r">${e.pontos}</td><td class="r"><input value="${String(e.dias).replace('.',',')}" data-chg="gdias" data-id="${e.id}" inputmode="decimal" style="width:70px;text-align:right"></td><td class="r"><b>${money(e.valor)}</b></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Cadastre a equipe.</td></tr>'}<tr><td colspan="4"><b>Total distribuído</b></td><td class="r"><b>${money(r2(r.eq.reduce((a,e)=>a+e.valor,0)))}</b></td></tr></table></div>
+ <div class="row" style="margin-top:10px"><button class="btn pri" data-act="gfechar">Fechar período e gerar demonstrativo</button><button class="btn" data-act="gcopy">Copiar demonstrativo (prévia)</button></div>
+ <h3 style="margin-top:14px">Gorjeta recebida fora da conta (lançamento manual)</h3><div class="row"><input id="g_ld" type="date" value="${dayKey(Date.now())}"><input id="g_lv" placeholder="Valor (R$)" inputmode="decimal" style="width:120px"><input id="g_lo" placeholder="Origem (ex.: pix à equipe)" style="flex:1"><button class="btn" data-act="glanc">Lançar</button></div>
+ ${(S.gorjLanc||[]).slice(-5).reverse().map(l=>`<div class="row muted" style="margin:3px 0"><span>${dmy(l.data+'T00:00:00')} · ${esc(l.obs||'-')}</span><b class="right">${money(l.valor)}</b></div>`).join('')}</div>
+ <div class="card" style="margin-top:12px"><h2>Fechamentos</h2><div class="tw"><table><tr><th>Período</th><th class="r">Total</th><th class="r">Retenção</th><th class="r">Distribuído</th><th>Fechado por</th><th></th></tr>${hist.map(f=>`<tr><td>${dmy(f.ini+'T00:00:00')} a ${dmy(f.fim+'T00:00:00')}</td><td class="r">${money(f.total)}</td><td class="r">${money(f.ret)}</td><td class="r">${money(f.dist)}</td><td>${esc(f.por||'-')}</td><td><button class="btn sm" data-act="gfcopy" data-id="${f.id}">Copiar</button>${can('regragorj')?` <button class="btn sm bad" data-act="gfreabrir" data-id="${f.id}">Reabrir</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Nenhum período fechado.</td></tr>'}</table></div>
+ ${Object.keys(med).length?`<h3 style="margin-top:12px">Média das gorjetas nos últimos 12 meses (por fechamento)</h3><p class="muted">Base para a anotação na CTPS e para a eventual incorporação ao salário se a cobrança cessar após mais de 12 meses (art. 457, §§6º, 8º e 9º, CLT) [VERIFICAR FONTE OFICIAL].</p><div class="tw"><table><tr><th>Empregado</th><th class="r">Fechamentos</th><th class="r">Média</th></tr>${Object.entries(med).map(([n,vs])=>`<tr><td>${esc(n)}</td><td class="r">${vs.length}</td><td class="r">${money(vs.reduce((a,b)=>a+b,0)/vs.length)}</td></tr>`).join('')}</table></div>`:''}
+ <p class="muted">A gorjeta integra a remuneração do empregado; os reflexos (FGTS, contribuição previdenciária, férias e 13º) são custeados pela retenção, e a Súmula 354 do TST afasta sua incidência sobre aviso prévio, adicional noturno, horas extras e repouso semanal remunerado [VERIFICAR FONTE OFICIAL]. Confirme os lançamentos de folha e de eSocial com o departamento pessoal.</p></div>`}
+
+/* ---- Padrões fiscais ---- */
+function fiscPerfil(id){return((S.cfg.fisc||{}).perfis||[]).find(x=>x.id===id)}
+function fiscItem(p){const pf=p.pf&&fiscPerfil(p.pf);return pf?{ncm:p.ncm,cest:pf.cest,cfop:pf.cfop,csosn:pf.csosn,cst_pis:pf.cstPis,cst_cofins:pf.cstCofins,origem:pf.origem}:{ncm:p.ncm,cfop:p.cfop,csosn:p.csosn}}
+function fiscPend(itens){if(S.cfg.ambiente!=='producao')return[];const out=new Set();(itens||[]).forEach(i=>{const p=prod(i.pid);const pf=p&&p.pf&&fiscPerfil(p.pf);if(!pf)return;if(pf.status!=='validado'||!pf.cfop||!pf.csosn||!pf.cstPis||!pf.cstCofins)out.add(pf.nome)});return[...out]}
+function fiscApur(mes){const out={},tot={v:0};
+ S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).forEach(v=>v.itens.forEach(i=>{const p=prod(i.pid)||{};const pf=p.pf&&fiscPerfil(p.pf);const k=pf?pf.id:'_sem';const val=r2(i.qtd*i.preco);out[k]=r2((out[k]||0)+val);tot.v=r2(tot.v+val)}));
+ const serv=r2(S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).reduce((a,v)=>a+(v.serv||0),0));return{out,total:tot.v,serv}}
+const SIMNAO={sim:'Sim',nao:'Não',revisar:'A definir com o contador'};
+function vPadroes(){
+ const F=S.cfg.fisc,ro=!can('padraofisc'),dz=ro?' disabled':'';if(!ui.fmes)ui.fmes=dayKey(Date.now()).slice(0,7);
+ const pend=F.perfis.filter(p=>p.status!=='validado'),ap=fiscApur(ui.fmes),V=F.validacao;
+ const cats=[...new Set(S.produtos.map(p=>p.cat))],semPf=S.produtos.filter(p=>!p.pf).length;
+ return head('Padrões fiscais de bebidas e produtos','Classificação fiscal por tipo de produto, com registro de validação pelo contador.')+
+ `<div class="banner"><b>Estado da revisão contábil:</b> ${V.status==='validado'&&!pend.length?`todos os padrões validados em ${esc(V.data?dmy(V.data+'T00:00:00'):'-')} por ${esc(V.contador)} (CRC ${esc(V.crc)}).`:`<b>pendente</b> — ${pend.length} padrão(ões) ainda como "sugerido". Os valores iniciais são um ponto de partida baseado em práticas usuais e <b>não foram revisados por contador</b>; a revisão deve ser registrada abaixo. Em ambiente de <b>produção</b>, a emissão de NFC-e fica bloqueada para itens cujo padrão não esteja validado ou esteja incompleto.`}</div>
+ ${ro?'<p class="muted">Somente o proprietário edita os padrões e registra a validação.</p>':''}
+ <div class="card" style="margin-top:12px"><h2>Validação do contador</h2><div class="form">${field('Contador responsável','fv_n',V.contador,'data-chg="fval" data-k="contador"'+dz)}${field('CRC','fv_c',V.crc,'data-chg="fval" data-k="crc"'+dz)}<label>Data da revisão<input type="date" value="${esc(V.data||'')}" data-chg="fval" data-k="data"${dz}></label>${field('Observações da revisão','fv_o',V.obs,'data-chg="fval" data-k="obs"'+dz)}</div>
+ ${ro?'':'<div class="row" style="margin-top:10px"><button class="btn pri" data-act="fvalidar">Registrar validação de todos os padrões pendentes</button></div>'}<p class="muted">Ao alterar qualquer campo de um padrão já validado, ele volta a "sugerido" e exige nova validação. O registro fica na trilha de auditoria.</p>
+ ${(V.hist||[]).slice(-3).reverse().map(h=>`<p class="muted">${dmy(h.data+'T00:00:00')} · ${esc(h.contador)} (CRC ${esc(h.crc)}) · ${h.n} padrão(ões)</p>`).join('')}</div>
+ ${F.perfis.map((p,i)=>`<div class="card" style="margin-top:12px"><div class="row"><h2 style="margin:0">${esc(p.nome)}</h2>${chip(p.status==='validado'?'validado':'sugerido',p.status==='validado'?'ok':'warn')}${ro?'':`<button class="btn sm bad right" data-act="fpdel" data-i="${i}">Excluir</button>`}</div>
+ <div class="form" style="margin-top:8px">${field('Nome do padrão','fp_n'+i,p.nome,`data-chg="fperf" data-i="${i}" data-k="nome"`+dz)}${field('NCM de referência (cada produto mantém o seu)','fp_nc'+i,p.ncmRef,`data-chg="fperf" data-i="${i}" data-k="ncmRef"`+dz)}${field('CEST','fp_ce'+i,p.cest,`data-chg="fperf" data-i="${i}" data-k="cest" maxlength="7" placeholder="00.000.00"`+dz)}${field('CFOP','fp_cf'+i,p.cfop,`data-chg="fperf" data-i="${i}" data-k="cfop" maxlength="4"`+dz)}${field('CSOSN/CST ICMS','fp_cs'+i,p.csosn,`data-chg="fperf" data-i="${i}" data-k="csosn" maxlength="3"`+dz)}${field('CST PIS','fp_pi'+i,p.cstPis,`data-chg="fperf" data-i="${i}" data-k="cstPis" maxlength="2"`+dz)}${field('CST COFINS','fp_co'+i,p.cstCofins,`data-chg="fperf" data-i="${i}" data-k="cstCofins" maxlength="2"`+dz)}${field('Origem da mercadoria','fp_or'+i,p.origem,`data-chg="fperf" data-i="${i}" data-k="origem" maxlength="1"`+dz)}
+ ${sel('ICMS-ST (já recolhido na origem)','fp_st'+i,Object.entries(SIMNAO),p.st).replace('<select',`<select data-chg="fperf" data-i="${i}" data-k="st"${dz}`)}${sel('PIS/COFINS monofásico','fp_mo'+i,Object.entries(SIMNAO),p.mono).replace('<select',`<select data-chg="fperf" data-i="${i}" data-k="mono"${dz}`)}</div>
+ ${field('Observações / fundamento','fp_ob'+i,p.obs,`data-chg="fperf" data-i="${i}" data-k="obs"`+dz)}
+ ${p.status==='validado'?`<p class="muted">Validado por ${esc(p.valPor)} (CRC ${esc(p.valCrc)}) em ${esc(p.valData?dmy(p.valData+'T00:00:00'):'-')}.</p>`:''}</div>`).join('')}
+ ${ro?'':'<button class="btn" style="margin-top:12px" data-act="fpadd">Adicionar padrão</button>'}
+ <div class="card" style="margin-top:12px"><h2>Aplicar padrão a uma categoria de produtos</h2><div class="form">${sel('Categoria','fa_cat',cats,cats[0])}${sel('Padrão fiscal','fa_pf',F.perfis.map(p=>[p.id,p.nome]),F.perfis[0]&&F.perfis[0].id)}</div><div class="row" style="margin-top:8px"><button class="btn" data-act="fpaplicar"${dz}>Aplicar à categoria</button></div><p class="muted">${semPf} produto(s) sem padrão fiscal (usam CFOP/CSOSN manuais do cadastro). O padrão também pode ser escolhido produto a produto, em Produtos.</p></div>
+ <div class="card" style="margin-top:12px"><h2>Apuração mensal por padrão (apoio à segregação de receitas)</h2><div class="form"><label>Mês<input type="month" value="${esc(ui.fmes)}" data-chg="fmes"></label></div>
+ <div class="tw"><table><tr><th>Padrão</th><th>ICMS-ST</th><th>Monofásico</th><th class="r">Receita de produtos</th></tr>${F.perfis.filter(p=>ap.out[p.id]).map(p=>`<tr><td>${esc(p.nome)}${p.status==='validado'?'':' '+chip('não validado','warn')}</td><td>${SIMNAO[p.st]}</td><td>${SIMNAO[p.mono]}</td><td class="r">${money(ap.out[p.id])}</td></tr>`).join('')}${ap.out._sem?`<tr><td>Sem padrão fiscal</td><td>-</td><td>-</td><td class="r">${money(ap.out._sem)}</td></tr>`:''}<tr><td colspan="3"><b>Total de produtos</b></td><td class="r"><b>${money(ap.total)}</b></td></tr></table></div>
+ <p class="muted">Taxa de serviço arrecadada no mês: <b>${money(ap.serv)}</b> (valor repassado aos empregados; o tratamento na receita bruta, na base de ICMS e no PGDAS-D deve ser definido pelo contador, pois há orientações distintas conforme o tributo e a UF) [VERIFICAR FONTE OFICIAL].</p>
+ <div class="row"><button class="btn" data-act="fcsv">Copiar apuração (CSV)</button></div></div>
+ <p class="muted" style="margin-top:12px">Referências para a revisão: Lei Complementar 123/2006, art. 18, §4º-A, I (exclusão das receitas de ST e monofásico na apuração do Simples); Instrução Normativa RFB 1.911/2019; Convênio ICMS 142/2018 (CEST e ICMS-ST); legislação do ICMS da UF do estabelecimento. [VERIFICAR FONTE OFICIAL] A reforma tributária (IBS/CBS) exigirá nova revisão destes padrões.</p>`}
+
+/* ---- Registro das telas, ações e manipuladores ---- */
+(()=>{const i=TABS.findIndex(t=>t[0]==='fiscal');TABS.splice(i+1,0,['padroes','Padrões fiscais'],['gorjeta','Gorjeta e rateio']);
+ VIEWS.gorjeta=vGorjeta;VIEWS.padroes=vPadroes;
+ ['gorjeta','padroes'].forEach(t=>{if(PERFIS.gerente.tabs!=='*'&&!PERFIS.gerente.tabs.includes(t))PERFIS.gerente.tabs.push(t)})})();
+const needG=()=>{if(!can('regragorj')){toast('Somente o proprietário altera a regra de gorjeta.');return false}return true};
+const needF=()=>{if(!can('padraofisc')){toast('Somente o proprietário altera os padrões fiscais.');return false}return true};
+Object.assign(CH,{
+ grule(v,d){if(!needG())return render();const g=GJ(),k=d.k;
+  if(k==='retPct'){const n=num(v),cap=GJ_CAP(S.cfg.regime);if(n<0||n>cap){toast('A retenção não pode exceder '+cap+'% para o regime '+S.cfg.regime+' (art. 457, §6º, CLT).');return render()}g.retPct=n}
+  else if(k==='comissao')g.comissao=!!v;else g[k]=v;logA('Regra de gorjeta alterada',k+' = '+(k==='retPct'?g.retPct:String(v).slice(0,60)));save();render()},
+ gfn(v,d){if(!needG())return render();const f=GJ().funcoes[+d.i];if(!f)return;if(d.k==='pontos')f.pontos=Math.max(0,num(v));else f.nome=v;save();render()},
+ geq(v,d){const m=S.gorjEquipe.find(x=>x.id===d.id);if(!m)return;if(d.k==='ativo')m.ativo=!!v;else m.funcao=v;save();render()},
+ gper(v,d){if(v)ui.gj[d.k]=v;if(ui.gj.fim<ui.gj.ini)ui.gj.fim=ui.gj.ini;render()},
+ gdias(v,d){ui.gj.dias[d.id]=v;render()},
+ fval(v,d){if(!needF())return render();S.cfg.fisc.validacao[d.k]=v;save()},
+ fperf(v,d){if(!needF())return render();const p=S.cfg.fisc.perfis[+d.i];if(!p)return;p[d.k]=(d.k==='cest'||d.k==='cfop'||d.k==='csosn'||d.k==='cstPis'||d.k==='cstCofins'||d.k==='origem')?String(v).trim():v;
+  if(p.status==='validado'){p.status='sugerido';p.valPor='';p.valCrc='';p.valData='';toast('Padrão alterado: exige nova validação do contador.')}logA('Padrão fiscal alterado',p.nome+' · '+d.k);save();render()},
+ fmes(v){ui.fmes=v||ui.fmes;render()}});
+Object.assign(A,{
+ gfadd(){if(!needG())return;GJ().funcoes.push({id:uid(),nome:'Nova função',pontos:1});save();render()},
+ gfdel(d){if(!needG())return;const f=GJ().funcoes[+d.i];if(!f)return;if(S.gorjEquipe.some(m=>m.funcao===f.id))return toast('Há empregados nesta função. Altere a função deles antes.');GJ().funcoes.splice(+d.i,1);save();render()},
+ geqadd(){const n=$('#g_nn').value.trim();if(!n)return toast('Informe o nome do empregado.');S.gorjEquipe.push({id:uid(),nome:n,funcao:$('#g_nf').value,ativo:true});logA('Equipe do rateio',n+' incluído');save();render()},
+ geqdel(d){const m=S.gorjEquipe.find(x=>x.id===d.id);if(!m)return;askConfirm('Remover '+m.nome+' da equipe do rateio? Fechamentos já feitos não são alterados.',()=>{S.gorjEquipe=S.gorjEquipe.filter(x=>x.id!==d.id);save();render()})},
+ glanc(){const v=r2(num($('#g_lv').value)),dt=$('#g_ld').value;if(v<=0||!dt)return toast('Informe data e valor.');S.gorjLanc.push({id:uid(),data:dt,valor:v,obs:$('#g_lo').value.trim()});logA('Gorjeta lançada',money(v));save();render()},
+ gcopy(){const r=gjCalc(ui.gj.ini,ui.gj.fim,ui.gj.dias);copyText(gjDemo(r,'PRÉVIA (período não fechado): '+dmy(r.ini+'T00:00:00')+' a '+dmy(r.fim+'T00:00:00')))},
+ gfechar(){const g=GJ(),r=gjCalc(ui.gj.ini,ui.gj.fim,ui.gj.dias),cap=GJ_CAP(S.cfg.regime);
+  if(g.retPct>cap)return toast('Retenção acima do limite legal. Corrija a regra.');
+  if(!g.instrumento)return toast('Informe o instrumento coletivo (ou a assembleia) antes de fechar.');
+  if(r.total<=0)return toast('Não há valor a ratear no período.');
+  if(r.W<=0)return toast('Nenhum empregado com peso no rateio (verifique funções, pontos e dias).');
+  if(S.gorjFech.some(f=>!(r.fim<f.ini||r.ini>f.fim)))return toast('Já existe fechamento que se sobrepõe a este período.');
+  askConfirm('Fechar o período '+dmy(r.ini+'T00:00:00')+' a '+dmy(r.fim+'T00:00:00')+'? Total a distribuir: '+money(r.dist)+'.',()=>{
+   S.gorjFech.push({id:uid(),ini:r.ini,fim:r.fim,serv:r.serv,lanc:r.lanc,total:r.total,ret:r.ret,dist:r.dist,por:ui.user?ui.user.nome:'',em:new Date().toISOString(),
+    regra:{instrumento:g.instrumento,registro:g.registro,retPct:g.retPct,criterio:g.criterio},itens:r.eq.map(e=>({eq:e.id,nome:e.nome,funcao:e.funcao,pontos:e.pontos,dias:e.dias,valor:e.valor}))});
+   logA('Rateio de gorjeta fechado',dmy(r.ini+'T00:00:00')+' a '+dmy(r.fim+'T00:00:00')+' · '+money(r.dist));ui.gj=gjMesPadrao();save();render();toast('Período fechado.')})},
+ gfcopy(d){const f=S.gorjFech.find(x=>x.id===d.id);if(f)copyText(gjDemo(f))},
+ gfreabrir(d){if(!needG())return;const f=S.gorjFech.find(x=>x.id===d.id);if(!f)return;askConfirm('Reabrir (excluir) o fechamento de '+dmy(f.ini+'T00:00:00')+' a '+dmy(f.fim+'T00:00:00')+'? Faça isso apenas se o valor ainda não foi pago.',()=>{S.gorjFech=S.gorjFech.filter(x=>x.id!==d.id);logA('Fechamento de gorjeta reaberto',dmy(f.ini+'T00:00:00')+' a '+dmy(f.fim+'T00:00:00'));save();render()})},
+ fpadd(){if(!needF())return;S.cfg.fisc.perfis.push(PF('pf_'+uid(),'Novo padrão fiscal',{}));save();render()},
+ fpdel(d){if(!needF())return;const p=S.cfg.fisc.perfis[+d.i];if(!p)return;if(S.produtos.some(x=>x.pf===p.id))return toast('Há produtos usando este padrão. Troque o padrão deles antes.');askConfirm('Excluir o padrão "'+p.nome+'"?',()=>{S.cfg.fisc.perfis.splice(+d.i,1);save();render()})},
+ fpaplicar(){if(!needF())return;const c=$('#fa_cat').value,id=$('#fa_pf').value;const l=S.produtos.filter(p=>p.cat===c);l.forEach(p=>p.pf=id);logA('Padrão fiscal aplicado',c+' → '+(fiscPerfil(id)||{}).nome+' ('+l.length+' produtos)');save();render();toast(l.length+' produto(s) atualizados.')},
+ fvalidar(){if(!needF())return;const F=S.cfg.fisc,V=F.validacao;if(!V.contador.trim()||!V.crc.trim())return toast('Informe o nome e o CRC do contador.');const dt=V.data||dayKey(Date.now());
+  const pend=F.perfis.filter(p=>p.status!=='validado');if(!pend.length)return toast('Não há padrões pendentes.');
+  const inc=pend.filter(p=>!p.cfop||!p.csosn||!p.cstPis||!p.cstCofins);if(inc.length)return toast('Complete CFOP, CSOSN e CST de PIS/COFINS em: '+inc.map(p=>p.nome).join('; '));
+  askConfirm('Confirma que '+V.contador+' (CRC '+V.crc+') revisou e validou '+pend.length+' padrão(ões) fiscal(is)?',()=>{pend.forEach(p=>{p.status='validado';p.valPor=V.contador;p.valCrc=V.crc;p.valData=dt});V.status='validado';V.data=dt;V.hist=(V.hist||[]).concat([{data:dt,contador:V.contador,crc:V.crc,n:pend.length}]);logA('Padrões fiscais validados pelo contador',V.contador+' · CRC '+V.crc+' · '+pend.length);save();render();toast('Validação registrada.')})},
+ fcsv(){const F=S.cfg.fisc,ap=fiscApur(ui.fmes);copyText(['padrao;icms_st;monofasico;receita',...F.perfis.filter(p=>ap.out[p.id]).map(p=>[p.nome,SIMNAO[p.st],SIMNAO[p.mono],String(ap.out[p.id]).replace('.',',')].join(';')),...(ap.out._sem?[['Sem padrão','-','-',String(ap.out._sem).replace('.',',')].join(';')]:[]),'taxa_servico_arrecadada;;;'+String(ap.serv).replace('.',',')].join('\n'))}});
 if(CLOUD()){S=blankState('');showLogin()}else{S=load();save();retryPend();if(ui.user)render();else showLogin()}
 
 </script>

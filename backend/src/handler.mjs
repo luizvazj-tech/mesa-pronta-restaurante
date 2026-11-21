@@ -8,7 +8,7 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 
 class HttpError extends Error { constructor(s, m) { super(m); this.status = s; } }
 const bad = m => new HttpError(400, m);
-const COLLS = ['produtos', 'insumos', 'comandas', 'vendas', 'delivery', 'entregadores', 'notas', 'contas', 'producao', 'movEst', 'caixaHist', 'audit', 'cfg', 'caixa'];
+const COLLS = ['produtos', 'insumos', 'comandas', 'vendas', 'delivery', 'entregadores', 'notas', 'contas', 'producao', 'movEst', 'caixaHist', 'audit', 'gorjEquipe', 'gorjLanc', 'gorjFech', 'cfg', 'caixa'];
 const CAN = { dono: '*', gerente: ['desconto', 'cancelar', 'sangria', 'cancnota', 'fechacaixa', 'contas', 'ajusteest'], caixa: ['fechacaixa'], garcom: [], cozinha: ['ajusteest'] };
 const PERFIS = Object.keys(CAN);
 const can = (perfil, a) => a === 'usuarios' ? perfil === 'dono' : CAN[perfil] === '*' || (CAN[perfil] || []).includes(a);

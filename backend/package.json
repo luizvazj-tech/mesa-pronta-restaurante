@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node test/run.mjs",
-    "test:e2e": "node test/e2e.mjs"
+    "test:e2e": "node test/e2e.mjs",
+    "test:gorjeta": "node test/gorjeta.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.600.0",
