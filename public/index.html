@@ -124,7 +124,7 @@ pre{white-space:pre-wrap;background:var(--surface2);padding:10px;border-radius:8
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=v=>(+v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-const num=s=>{s=String(s==null?'':s).trim();if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');const n=parseFloat(s);return isNaN(n)?0:n};
+const num=s=>{s=String(s==null?'':s).trim();if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');const n=parseFloat(s);return isFinite(n)?n:0};
 const qf=n=>(+n).toLocaleString('pt-BR',{maximumFractionDigits:3});
 /* ===== Dinheiro em centavos inteiros — critério ÚNICO de arredondamento =====
    Todo valor monetário é calculado em centavos inteiros e arredondado UMA vez por operação,
@@ -133,7 +133,7 @@ const qf=n=>(+n).toLocaleString('pt-BR',{maximumFractionDigits:3});
    (com 2 casas), para compatibilidade com os dados e o servidor. Divisões em partes (rateio, ex.: gorjeta)
    usam o método do maior resto, que fecha exatamente o total em centavos. */
 const EPS=1e-7;
-const rc=x=>{x=+x||0;return x<0?-Math.floor(-x+0.5+EPS):Math.floor(x+0.5+EPS)}; /* fração de centavo → centavo inteiro */
+const rc=x=>{x=+x||0;if(!isFinite(x))return 0;return x<0?-Math.floor(-x+0.5+EPS):Math.floor(x+0.5+EPS)}; /* fração de centavo → centavo inteiro */
 const toC=v=>rc((+v||0)*100);            /* reais → centavos inteiros */
 const fromC=c=>c/100;                    /* centavos inteiros → reais */
 const r2=n=>fromC(toC(n));               /* arredonda reais a 2 casas pelo critério único */
@@ -223,7 +223,7 @@ function payloadNota(nota){const v=S.vendas.find(x=>x.id===nota.vendaId),c=S.cfg
  return{ambiente:c.ambiente==='producao'?1:2,modelo:65,serie:nota.serie,numero:nota.numero,emitente:{cnpj:cnpjLimpo(c.cnpj),ie:c.ie,uf:c.uf,regime:c.regime,csc_id:c.cscId},
  destinatario:nota.doc?{documento:nota.doc}:null,
  itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,...fiscItem(p),unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.preco,valor_total:fromC(linhaC(i.preco,i.qtd))}}),
- pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:fromC(toC(v.serv)+toC(v.taxa)),total:v.total}}
+ pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:fromC(toC(v.serv)+toC(v.taxa)),total:v.total,ref:v.id}}
 async function transmitir(nota){
  const c=S.cfg;
  if(CLOUD()){if(!navigator.onLine){nota.status='pendente';nota.msg='Sem internet: nota em fila, será transmitida ao reconectar.';return}
@@ -289,7 +289,7 @@ function vendasDias(n){const lim=new Date();lim.setHours(0,0,0,0);lim.setDate(li
 const vendasHoje=()=>vendasDias(1);
 const soma=(a,f)=>fromC(a.reduce((x,y)=>x+toC(f(y)),0)); /* soma monetária exata: cada parcela vira centavo inteiro */
 const cmv=v=>soma(v.itens,i=>i.qtd*i.custo);
-function topProdutos(vs){const m={};vs.forEach(v=>v.itens.forEach(i=>{const k=i.nome;m[k]=m[k]||{nome:k,qtd:0,rec:0,custo:0};m[k].qtd+=i.qtd;m[k].rec+=i.qtd*i.preco;m[k].custo+=i.qtd*i.custo}));return Object.values(m).sort((a,b)=>b.rec-a.rec)}
+function topProdutos(vs){const m={};vs.forEach(v=>v.itens.forEach(i=>{const k=i.nome;m[k]=m[k]||{nome:k,qtd:0,rec:0,custo:0};m[k].qtd+=i.qtd;m[k].rec+=fromC(linhaC(i.preco,i.qtd));m[k].custo+=i.qtd*i.custo}));return Object.values(m).sort((a,b)=>b.rec-a.rec)}
 function caixaEsperado(){const c=S.caixa;if(!c.aberto)return 0;const ini=new Date(c.em);let d=toC(c.abertura);S.vendas.filter(v=>new Date(v.data)>=ini).forEach(v=>v.pagamentos.filter(p=>p.forma==='Dinheiro').forEach(p=>d+=toC(p.valor)));c.movs.forEach(m=>d+=m.tipo==='suprimento'?toC(m.valor):-toC(m.valor));return fromC(d)}
 const baixos=()=>S.insumos.filter(i=>i.estoque<=i.min);
 const notasPend=()=>S.notas.filter(n=>n.status==='pendente'||n.status==='rejeitada');
@@ -576,7 +576,7 @@ const A={
  edadd(){syncEd();const e=ui.ed;const L=e.kind==='prod'?e.d.ficha:e.d.receita;const o=S.insumos.find(x=>x.id!==e.id);if(!o)return toast('Cadastre insumos primeiro.');L.push({id:o.id,qtd:0});drawEd()},
  edrm(d){syncEd();const e=ui.ed;(e.kind==='prod'?e.d.ficha:e.d.receita).splice(+d.k,1);drawEd()},
  edsave(){syncEd();const e=ui.ed,d=e.d;if(!d.nome.trim())return toast('Informe o nome.');
-  if(e.kind==='prod'){if(d.preco<=0)return toast('Informe o preço.');d.ficha=d.ficha.filter(l=>l.qtd>0);let cod=(d.cod||'').trim();if(!cod){let n=101;while(S.produtos.some(p=>p.cod===String(n)))n++;cod=String(n)}if(S.produtos.some(p=>p.cod===cod&&p.id!==e.id))return toast('Já existe um produto com este código.');const o={id:e.id||'p'+uid(),cod,nome:d.nome.trim(),cat:d.cat||'Outros',preco:d.preco,tipo:d.tipo,custoManual:d.custoManual,ncm:d.ncm,cfop:d.cfop,csosn:d.csosn,ficha:d.ficha};if(e.id)S.produtos[S.produtos.findIndex(p=>p.id===e.id)]=o;else S.produtos.push(o)}
+  if(e.kind==='prod'){if(d.preco<=0)return toast('Informe o preço.');if(d.preco>99999.99)return toast('Preço acima do limite de R$ 99.999,99. Confira o valor digitado.');d.ficha=d.ficha.filter(l=>l.qtd>0);let cod=(d.cod||'').trim();if(!cod){let n=101;while(S.produtos.some(p=>p.cod===String(n)))n++;cod=String(n)}if(S.produtos.some(p=>p.cod===cod&&p.id!==e.id))return toast('Já existe um produto com este código.');const o={id:e.id||'p'+uid(),cod,nome:d.nome.trim(),cat:d.cat||'Outros',preco:d.preco,tipo:d.tipo,custoManual:d.custoManual,ncm:d.ncm,cfop:d.cfop,csosn:d.csosn,ficha:d.ficha};if(e.id)S.produtos[S.produtos.findIndex(p=>p.id===e.id)]=o;else S.produtos.push(o)}
   else{if(d.prep&&e.id){const cc=cicloDe(e.id,d.receita.filter(l=>l.qtd>0));if(cc)return toast('Receita circular: '+cc.join(' → ')+'. Remova um dos itens para salvar.')}const o={id:e.id||'i'+uid(),nome:d.nome.trim(),un:d.un,estoque:d.estoque,min:d.min,custo:d.custo};if(d.prep){o.receita=d.receita.filter(l=>l.qtd>0);o.rend=d.rend>0?d.rend:1}
    if(e.id){const old=ins(e.id);o.estoque=old.estoque;S.insumos[S.insumos.findIndex(i=>i.id===e.id)]=o}else S.insumos.push(o)}
   logA(e.kind==='prod'?'Produto salvo':'Insumo salvo',d.nome.trim());save();ui.ed=null;hideModal();toast('Salvo.')},
@@ -611,7 +611,7 @@ const A={
  zerar(){askConfirm('Apagar vendas, notas, pedidos e contas? Produtos, insumos e fichas são mantidos.',()=>{logA('Dados operacionais apagados');S.vendas=[];S.notas=[];S.delivery=[];S.comandas=[];S.contas=[];S.producao=[];S.movEst=[];S.caixaHist=[];S.seq=1;S.cfg.proxNum=1;save();render();toast('Dados operacionais limpos.')})},
  resetall(){askConfirm('Restaurar todos os dados de demonstração, inclusive usuários e PINs iniciais? Suas alterações serão perdidas.',()=>{S=seed();ui.user=null;save();showLogin()})},
  backup(){copyText(JSON.stringify(S))},
- restaurar(){try{const o=JSON.parse($('#bk').value);if(!o||o.v!==1||!o.produtos)throw 0;S=migra(o);ui.user=null;save();showLogin();toast('Backup restaurado.')}catch(e){toast('Texto de backup inválido.')}}
+ restaurar(){try{const o=JSON.parse($('#bk').value);if(!o||o.v!==1||!o.cfg||!['produtos','insumos','vendas','comandas','delivery','notas','contas'].every(k=>Array.isArray(o[k])))throw 0;S=migra(o);ui.user=null;save();showLogin();toast('Backup restaurado.')}catch(e){toast('Texto de backup inválido.')}}
 };
 const CH={
  cfg(v,d){if(d.k==='cnpj'){v=String(v).trim();if(v&&!validaCNPJ(v)){toast('CNPJ inválido. Confira os 12 primeiros caracteres e os 2 dígitos verificadores.');render();return}v=v?fmtCNPJ(v):'';S.cfg.cnpj=v;save();render();return}if(CLOUD()&&FISCAL_KEYS.includes(d.k)){const body={};body[d.k]=v;api('PUT','/fiscal',body).then(()=>{if(d.k!=='token')S.cfg[d.k]=v;toast('Configuração fiscal salva no servidor.')}).catch(e=>toast(e.message));return}S.cfg[d.k]=v;save();if(d.k==='nome')renderNav()},
@@ -790,7 +790,7 @@ async function syncNow(){
   for(;;){const d=computeDiff();if(!d.changes.length&&!d.incs.length)break;
    const all=[...d.changes.map(x=>({t:'c',x})),...d.incs.map(x=>({t:'i',x}))].slice(0,150);
    const b={changes:all.filter(a=>a.t==='c').map(a=>a.x),incs:all.filter(a=>a.t==='i').map(a=>a.x)};
-   await api('POST','/sync',{changes:b.changes.map(({c,id,d,del})=>({c,id,d,del})),incs:b.incs.map(({c,id,delta})=>({c,id,delta}))});commit(b)}
+   const rs=await api('POST','/sync',{changes:b.changes.map(({c,id,d,del})=>({c,id,d,del})),incs:b.incs.map(({c,id,delta})=>({c,id,delta}))});commit(b);if(rs&&rs.rej)toast('Alguma alteração não foi aceita pelo servidor: o seu perfil não tem permissão. Peça ao proprietário.')}
   let cur=Math.max(0,cloud.cs-50);
   for(;;){const j=await api('GET','/sync',null,{since:String(cur)});changed+=applyRecords(j.records);cloud.cs=Math.max(cloud.cs,j.cs);cur=j.cs;if(!j.more)break}
   setSync('ok');saveCache();

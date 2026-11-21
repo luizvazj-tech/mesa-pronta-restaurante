@@ -11,6 +11,11 @@ const bad = m => new HttpError(400, m);
 const COLLS = ['produtos', 'insumos', 'comandas', 'vendas', 'delivery', 'entregadores', 'notas', 'contas', 'producao', 'movEst', 'caixaHist', 'audit', 'gorjEquipe', 'gorjLanc', 'gorjFech', 'cfg', 'caixa'];
 const CAN = { dono: '*', gerente: ['desconto', 'cancelar', 'sangria', 'cancnota', 'fechacaixa', 'contas', 'ajusteest'], caixa: ['fechacaixa'], garcom: [], cozinha: ['ajusteest'] };
 const PERFIS = Object.keys(CAN);
+// Quem pode GRAVAR cada coleção (as demais são operacionais e ficam abertas a qualquer perfil autenticado).
+// 'audit' é somente de inclusão: ninguém altera nem apaga registro existente.
+const WRITE = { cfg: ['dono'], produtos: ['dono', 'gerente'], insumos: ['dono', 'gerente', 'cozinha'], contas: ['dono', 'gerente'], gorjEquipe: ['dono', 'gerente'], gorjLanc: ['dono', 'gerente'], gorjFech: ['dono', 'gerente'] };
+const NFCE_PERFIS = ['dono', 'gerente', 'caixa'];
+const lockMs = strikes => Math.min(60000 * 2 ** Math.min(strikes || 0, 6), 3600000); // 1 min, 2, 4 ... até 1 h
 const can = (perfil, a) => a === 'usuarios' ? perfil === 'dono' : CAN[perfil] === '*' || (CAN[perfil] || []).includes(a);
 const RESERVED = new Set(['admin', 'api', 'www', 'app', 'login', 'signup', 'mesa-pronta']);
 const UFC = { RO: 11, AC: 12, AM: 13, RR: 14, PA: 15, AP: 16, TO: 17, MA: 21, PI: 22, CE: 23, RN: 24, PB: 25, PE: 26, AL: 27, SE: 28, BA: 29, MG: 31, ES: 32, RJ: 33, SP: 35, PR: 41, SC: 42, RS: 43, MS: 50, MT: 51, GO: 52, DF: 53 };
@@ -52,7 +57,10 @@ export function createApp(deps) {
     const m = /^Bearer (.+)$/i.exec(h.authorization || h.Authorization || '');
     if (!m) throw new HttpError(401, 'Faça login.');
     const c = verify(m[1], await getSecret(), Math.floor(now() / 1000));
-    return c; // {tid, uid, perfil, nome}
+    // O token só prova a identidade; perfil e situação vêm do cadastro atual (usuário desativado ou rebaixado perde acesso na hora).
+    const u = await get(T(c.tid), `U#${c.uid}`);
+    if (!u || !u.ativo) throw new HttpError(401, 'Sessão encerrada.');
+    return { ...c, perfil: u.perfil, nome: u.nome, u }; // {tid, uid, perfil, nome, u}
   }
   const issue = async (u, tenant) => sign({ tid: tenant.tid, uid: u.uid, perfil: u.perfil, nome: u.nome, exp: Math.floor(now() / 1000) + 12 * 3600 }, await getSecret());
 
@@ -97,10 +105,10 @@ export function createApp(deps) {
     if (u.lockUntil > now()) throw new HttpError(429, `Muitas tentativas. Aguarde ${Math.ceil((u.lockUntil - now()) / 1000)} s.`);
     if (!pinOk(body.pin, u.ps, u.ph)) {
       const r = await upd(T(s.tid), u.SK, 'ADD fails :one', { ':one': 1 });
-      if (r.Attributes.fails >= 5) await upd(T(s.tid), u.SK, 'SET fails = :z, lockUntil = :l', { ':z': 0, ':l': now() + 60000 });
+      if (r.Attributes.fails >= 5) await upd(T(s.tid), u.SK, 'SET fails = :z, lockUntil = :l, strikes = :k', { ':z': 0, ':l': now() + lockMs(u.strikes), ':k': (u.strikes || 0) + 1 });
       throw fail;
     }
-    await upd(T(s.tid), u.SK, 'SET fails = :z, ultimo = :u', { ':z': 0, ':u': new Date(now()).toISOString() });
+    await upd(T(s.tid), u.SK, 'SET fails = :z, strikes = :z, ultimo = :u', { ':z': 0, ':u': new Date(now()).toISOString() });
     const meta = await get(T(s.tid), 'META');
     return { token: await issue(u, s), user: pubUser(u), tenant: { id: s.tid, slug: meta.slug, nome: meta.nome } };
   });
@@ -141,15 +149,15 @@ export function createApp(deps) {
   });
 
   route('POST', '/authorize', async ({ claims, body }) => {
-    const meta = await get(T(claims.tid), 'META');
-    if ((meta.authLock || 0) > now()) throw new HttpError(429, 'Muitas tentativas. Aguarde alguns segundos.');
+    const me = claims.u, key = { PK: T(claims.tid), SK: me.SK };
+    if ((me.aLock || 0) > now()) throw new HttpError(429, `Muitas tentativas. Aguarde ${Math.ceil((me.aLock - now()) / 1000)} s.`);
     const u = (await users(claims.tid)).find(x => x.ativo && can(x.perfil, body.acao) && pinOk(body.pin, x.ps, x.ph));
     if (!u) {
-      const r = await upd(T(claims.tid), 'META', 'ADD authFails :one', { ':one': 1 });
-      if (r.Attributes.authFails >= 5) await upd(T(claims.tid), 'META', 'SET authFails = :z, authLock = :l', { ':z': 0, ':l': now() + 60000 });
+      const r = await upd(key.PK, key.SK, 'ADD aFails :one', { ':one': 1 });
+      if (r.Attributes.aFails >= 5) await upd(key.PK, key.SK, 'SET aFails = :z, aLock = :l, aStrikes = :k', { ':z': 0, ':l': now() + lockMs(me.aStrikes), ':k': (me.aStrikes || 0) + 1 });
       throw new HttpError(403, 'Este PIN não autoriza a ação.');
     }
-    await upd(T(claims.tid), 'META', 'SET authFails = :z', { ':z': 0 });
+    await upd(key.PK, key.SK, 'SET aFails = :z, aStrikes = :z', { ':z': 0 });
     return { ok: true, nome: u.nome };
   });
 
@@ -166,17 +174,20 @@ export function createApp(deps) {
     if (changes.length + incs.length > 200) throw bad('Lote grande demais (máximo de 200 alterações).');
     const total = changes.length + incs.length;
     if (!total) return { ok: true };
+    for (const ch of changes) if (!ch || !COLLS.includes(ch.c) || typeof ch.id !== 'string' || !ch.id || ch.id.length > 64) throw bad('Registro inválido.');
+    let rej = 0; const permitido = ch => !(WRITE[ch.c] && !WRITE[ch.c].includes(claims.perfil)) && !(ch.c === 'audit' && ch.del);
     const last = await nextCounter(claims.tid, 'chg', total);
     let cs = last - total;
     for (const ch of changes) {
       cs++;
-      if (!COLLS.includes(ch.c) || typeof ch.id !== 'string' || !ch.id || ch.id.length > 64) throw bad('Registro inválido.');
+      if (!permitido(ch)) { rej++; continue; }
       const key = { PK: T(claims.tid), SK: `R#${ch.c}#${ch.id}` };
       const base = { ':c': ch.c, ':id': ch.id, ':cs': cs, ':g': T(claims.tid) };
       if (ch.del) { await upd(key.PK, key.SK, 'SET c = :c, id = :id, #d = :t, cs = :cs, GSI1PK = :g, GSI1SK = :cs', { ...base, ':t': true }, { '#d': 'del' }); continue; }
       const d = { ...ch.d }; const est = Number(d.estoque) || 0; if (ch.c === 'insumos') delete d.estoque;
       const j = JSON.stringify(d); if (j.length > 100000) throw bad('Registro grande demais.');
       if (ch.c === 'insumos') await upd(key.PK, key.SK, 'SET c = :c, id = :id, j = :j, #d = :f, cs = :cs, GSI1PK = :g, GSI1SK = :cs, est = if_not_exists(est, :e)', { ...base, ':j': j, ':f': false, ':e': est }, { '#d': 'del' });
+      else if (ch.c === 'audit') { try { await upd(key.PK, key.SK, 'SET c = :c, id = :id, j = :j, #d = :f, cs = :cs, GSI1PK = :g, GSI1SK = :cs', { ...base, ':j': j, ':f': false }, { '#d': 'del' }, { ConditionExpression: 'attribute_not_exists(PK)' }); } catch (e) { if (e.name !== 'ConditionalCheckFailedException') throw e; rej++; } }
       else await upd(key.PK, key.SK, 'SET c = :c, id = :id, j = :j, #d = :f, cs = :cs, GSI1PK = :g, GSI1SK = :cs', { ...base, ':j': j, ':f': false }, { '#d': 'del' });
     }
     for (const ic of incs) {
@@ -185,7 +196,7 @@ export function createApp(deps) {
       try { await upd(T(claims.tid), `R#insumos#${ic.id}`, 'ADD est :d SET cs = :cs, GSI1PK = :g, GSI1SK = :cs', { ':d': Number(ic.delta), ':cs': cs, ':g': T(claims.tid) }, null, { ConditionExpression: 'attribute_exists(PK)' }); }
       catch (e) { if (e.name !== 'ConditionalCheckFailedException') throw e; }
     }
-    return { ok: true, cs: last };
+    return { ok: true, cs: last, rej };
   });
 
   route('POST', '/counter', async ({ claims, body }) => {
@@ -209,23 +220,30 @@ export function createApp(deps) {
     return { ok: true };
   });
   route('POST', '/nfce/transmit', async ({ claims, body }) => {
+    if (!NFCE_PERFIS.includes(claims.perfil)) throw new HttpError(403, 'Seu perfil não emite NFC-e.');
     const p = body.payload || {}, e = p.emitente || {};
+    const ref = typeof p.ref === 'string' && p.ref && p.ref.length <= 64 ? p.ref : '';
     const meta = await get(T(claims.tid), 'META'), f = meta.fiscal || { provedor: 'simulado' };
     if (e.cnpj && !validaCnpj(e.cnpj)) throw bad('CNPJ do emitente inválido.');
-    const numero = Number(p.numero) > 0 ? Number(p.numero) : await nextCounter(claims.tid, 'n_nfce');
+    // Idempotência: a mesma venda nunca gera dois números. Autorizada/rejeitada devolve o resultado guardado; pendente reaproveita o número.
+    const nvKey = ref ? { PK: T(claims.tid), SK: `NV#${ref}` } : null;
+    const prev = nvKey ? await get(nvKey.PK, nvKey.SK) : null;
+    if (prev && prev.status !== 'pendente') return { numero: prev.numero, status: prev.status, chave: prev.chave, protocolo: prev.protocolo, msg: prev.msg };
+    const numero = prev ? prev.numero : await nextCounter(claims.tid, 'n_nfce'); // o número NUNCA vem do cliente
     const full = { ...p, numero };
+    const guarda = async r => { if (nvKey) await put({ ...nvKey, numero, status: r.status, chave: r.chave, protocolo: r.protocolo, msg: r.msg, em: new Date(now()).toISOString() }); return r; };
     if (f.provedor === 'api' && f.url) {
       if (!e.cnpj) throw bad('Informe o CNPJ do emitente nas configurações fiscais.');
       try {
         const r = await fetchFn(f.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (f.token || '') }, body: JSON.stringify(full) });
         const j = await r.json().catch(() => ({}));
-        if (r.ok && (j.status === 'autorizada' || j.chave)) return { numero, status: 'autorizada', chave: j.chave || '', protocolo: j.protocolo || '', msg: j.mensagem || 'Autorizada.' };
-        return { numero, status: 'rejeitada', chave: '', protocolo: '', msg: j.mensagem || `Rejeitada pelo provedor (HTTP ${r.status}).` };
-      } catch { return { numero, status: 'pendente', chave: '', protocolo: '', msg: 'Provedor inacessível: nota pendente de transmissão.' }; }
+        if (r.ok && (j.status === 'autorizada' || j.chave)) return guarda({ numero, status: 'autorizada', chave: j.chave || '', protocolo: j.protocolo || '', msg: j.mensagem || 'Autorizada.' });
+        return guarda({ numero, status: 'rejeitada', chave: '', protocolo: '', msg: j.mensagem || `Rejeitada pelo provedor (HTTP ${r.status}).` });
+      } catch { return guarda({ numero, status: 'pendente', chave: '', protocolo: '', msg: 'Provedor inacessível: nota pendente de transmissão.' }); }
     }
     const d = new Date(now()), aamm = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0');
     const base = String(UFC[e.uf] || 41) + aamm + cnpjLimpo(e.cnpj).padStart(14, '0').slice(0, 14) + '65' + String(p.serie || 1).padStart(3, '0') + String(numero).padStart(9, '0') + '1' + String(crypto.randomInt(0, 1e8)).padStart(8, '0');
-    return { numero, status: 'autorizada', chave: base + dv11(base), protocolo: 'SIM' + String(now()).slice(-9), msg: 'Autorizada em simulação, sem valor fiscal.' };
+    return guarda({ numero, status: 'autorizada', chave: base + dv11(base), protocolo: 'SIM' + String(now()).slice(-9), msg: 'Autorizada em simulação, sem valor fiscal.' });
   });
 
   return async function handler(event) {

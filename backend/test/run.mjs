@@ -69,11 +69,37 @@ assert.equal(new Set(nums.map(x => x.data.n)).size, 5); ok('contador de vendas �
 const pl = { numero: 0, serie: 1, emitente: { cnpj: '12.345.678/0001-95', uf: 'PR' } };
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: pl } }); assert.equal(r.data.numero, 1); assert.equal(r.data.chave.length, 44); assert.equal(r.data.status, 'autorizada');
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: pl } }); assert.equal(r.data.numero, 2); ok('NFC-e: número sequencial atribuído pelo servidor, chave de 44 dígitos');
-r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, numero: 2 } } }); assert.equal(r.data.numero, 2); ok('reenvio mantém o número');
+const plr = { ...pl, ref: 'venda-xyz' };
+const t1 = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: plr } }); const t2 = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: plr } });
+assert.equal(t1.data.numero, t2.data.numero); assert.equal(t1.data.chave, t2.data.chave); ok('reenvio da mesma venda devolve o mesmo número e a mesma chave (idempotente)');
+r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, ref: 'venda-forjada', numero: 9000 } } }); assert.ok(r.data.numero < 100); ok('o número da NFC-e nunca vem do cliente');
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, emitente: { cnpj: '12.ABC.345/01DE-35', uf: 'PR' } } } });
 assert.equal(r.data.chave.length, 44); assert.ok(r.data.chave.includes('12ABC34501DE35')); assert.match(r.data.chave, /^[0-9A-Z]{43}[0-9]$/); ok('CNPJ alfanumérico: chave de 44 posições com letras no CNPJ');
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, emitente: { cnpj: '12.ABC.345/01DE-36', uf: 'PR' } } } }); assert.equal(r.status, 400); ok('CNPJ com dígito verificador inválido é rejeitado pelo servidor');
 r = await call('PUT', '/fiscal', { token: tokC, body: { provedor: 'api', url: 'https://x', token: 'seg' } }); assert.equal(r.status, 403); ok('só o proprietário configura o fiscal');
 r = await call('PUT', '/fiscal', { token: tokA, body: { provedor: 'api', url: 'http://inseguro' } }); assert.equal(r.status, 400); ok('URL do provedor exige https');
 r = await call('GET', '/nao-existe', { token: tokA }); assert.equal(r.status, 404);
+// ===== regressões da auditoria =====
+const pull = async tok => { let since = 0, all = []; for (;;) { const x = await call('GET', '/sync', { token: tok, query: { since: String(since) } }); all = all.concat(x.data.records); since = x.data.cs; if (!x.data.more) return all; } };
+r = await call('POST', '/users', { token: tokA, body: { nome: 'Caixa Aud', perfil: 'caixa', pin: '1111' } }); const cxId = r.data.user.id;
+r = await call('POST', '/login', { body: { slug: 'sabor-da-casa', userId: cxId, pin: '1111' } }); const tokCx = r.data.token;
+r = await call('POST', '/sync', { token: tokCx, body: { changes: [{ c: 'cfg', id: 'main', d: { nome: 'hack' } }, { c: 'contas', id: 'k9', d: { valor: 1 } }, { c: 'vendas', id: 'vok', d: { id: 'vok', total: 1 } }] } });
+assert.equal(r.data.rej, 2); const recs = await pull(tokA);
+assert.ok(!recs.some(x => x.c === 'contas' && x.id === 'k9') && recs.some(x => x.c === 'vendas' && x.id === 'vok')); ok('caixa não grava cfg nem contas; venda (operacional) passa');
+await call('POST', '/sync', { token: tokA, body: { changes: [{ c: 'audit', id: 'au1', d: { acao: 'original' } }] } });
+r = await call('POST', '/sync', { token: tokCx, body: { changes: [{ c: 'audit', id: 'au1', d: { acao: 'adulterado' } }, { c: 'audit', id: 'au1', del: true }] } }); assert.equal(r.data.rej, 2);
+const au = (await pull(tokA)).find(x => x.c === 'audit' && x.id === 'au1'); assert.equal(au.d.acao, 'original'); assert.equal(au.del, false); ok('trilha de auditoria é somente de inclusão (sem alterar nem apagar)');
+await call('POST', '/users', { token: tokA, body: { id: cxId, nome: 'Caixa Aud', perfil: 'garcom', pin: '' } });
+r = await call('POST', '/nfce/transmit', { token: tokCx, body: { payload: { ...pl, ref: 'r-garcom' } } }); assert.equal(r.status, 403); ok('perfil rebaixado perde a permissão imediatamente (sem esperar o token vencer)');
+await call('POST', '/users', { token: tokA, body: { id: cxId, nome: 'Caixa Aud', perfil: 'garcom', ativo: false } });
+r = await call('GET', '/sync', { token: tokCx, query: { since: '0' } }); assert.equal(r.status, 401); ok('usuário desativado perde o acesso imediatamente');
+r = await call('POST', '/users', { token: tokA, body: { nome: 'Gar1', perfil: 'garcom', pin: '4444' } }); const g1 = (await call('POST', '/login', { body: { slug: 'sabor-da-casa', userId: r.data.user.id, pin: '4444' } })).data.token;
+for (let i = 0; i < 5; i++) await call('POST', '/authorize', { token: g1, body: { acao: 'desconto', pin: '0000' } });
+r = await call('POST', '/authorize', { token: tokA, body: { acao: 'desconto', pin: '1234' } }); assert.equal(r.status, 200); ok('garçom que erra PINs não bloqueia a autorização do proprietário');
+r = await call('POST', '/authorize', { token: g1, body: { acao: 'desconto', pin: '1234' } }); assert.equal(r.status, 429); ok('o bloqueio vale só para quem errou');
+{ const id = (await call('GET', '/public/users', { query: { slug: 'cantina-dois' } })).data.users[0].id;
+  for (let i = 0; i < 5; i++) await call('POST', '/login', { body: { slug: 'cantina-dois', userId: id, pin: '0000' } }); b.advance(61000);
+  for (let i = 0; i < 5; i++) await call('POST', '/login', { body: { slug: 'cantina-dois', userId: id, pin: '0000' } }); b.advance(61000);
+  r = await call('POST', '/login', { body: { slug: 'cantina-dois', userId: id, pin: '9999' } }); assert.equal(r.status, 429); b.advance(60000);
+  r = await call('POST', '/login', { body: { slug: 'cantina-dois', userId: id, pin: '9999' } }); assert.equal(r.status, 200); ok('bloqueio progressivo no login: 1ª falha 1 min, 2ª 2 min; zera ao acertar'); }
 await b.close(); console.log('\n' + n + ' verificações passaram'); process.exit(0);

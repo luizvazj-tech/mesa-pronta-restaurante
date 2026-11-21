@@ -22,6 +22,8 @@ Globals:
 Resources:
   Table:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
@@ -43,6 +45,8 @@ Resources:
 
   JwtSecret:
     Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Description: Chave de assinatura das sessões do Mesa Pronta
       GenerateSecretString:
