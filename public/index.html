@@ -126,7 +126,19 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const money=v=>(+v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const num=s=>{s=String(s==null?'':s).trim();if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');const n=parseFloat(s);return isNaN(n)?0:n};
 const qf=n=>(+n).toLocaleString('pt-BR',{maximumFractionDigits:3});
-const r2=n=>Math.round((+n||0)*100)/100;
+/* ===== Dinheiro em centavos inteiros — critério ÚNICO de arredondamento =====
+   Todo valor monetário é calculado em centavos inteiros e arredondado UMA vez por operação,
+   sempre pelo mesmo critério: metade para longe do zero (arredondamento comercial), com tolerância
+   de ponto flutuante (EPS) para que 1,005 vire 1,01 e não 1,00. Os valores gravados continuam em reais
+   (com 2 casas), para compatibilidade com os dados e o servidor. Divisões em partes (rateio, ex.: gorjeta)
+   usam o método do maior resto, que fecha exatamente o total em centavos. */
+const EPS=1e-7;
+const rc=x=>{x=+x||0;return x<0?-Math.floor(-x+0.5+EPS):Math.floor(x+0.5+EPS)}; /* fração de centavo → centavo inteiro */
+const toC=v=>rc((+v||0)*100);            /* reais → centavos inteiros */
+const fromC=c=>c/100;                    /* centavos inteiros → reais */
+const r2=n=>fromC(toC(n));               /* arredonda reais a 2 casas pelo critério único */
+const linhaC=(preco,qtd)=>rc(toC(preco)*(+qtd||0)); /* valor da linha (preço × quantidade) em centavos */
+const pctC=(c,p)=>rc(c*(+p||0)/100);     /* percentual sobre centavos, arredondado uma vez */
 const uid=()=>Math.random().toString(36).slice(2,9);
 const dayKey=d=>new Date(d).toLocaleDateString('sv-SE');
 const hhmm=d=>new Date(d).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -179,16 +191,22 @@ function logA(acao,det){if(!S)return;S.audit.push({data:new Date().toISOString()
 /* ===== Domínio ===== */
 const ins=id=>S.insumos.find(i=>i.id===id);
 const prod=id=>S.produtos.find(p=>p.id===id);
-function custoIns(i){if(i.receita&&i.receita.length&&i.rend>0){return i.receita.reduce((a,l)=>{const x=ins(l.id);return a+(x?l.qtd*custoIns(x):0)},0)/i.rend}return i.custo||0}
+function custoIns(i,vis){vis=vis||new Set();if(vis.has(i.id)){ui.ciclo=true;return 0} /* referência circular: não trava, custo do trecho = 0 e o ciclo é sinalizado */
+ vis.add(i.id);if(i.receita&&i.receita.length&&i.rend>0){return i.receita.reduce((a,l)=>{const x=ins(l.id);return a+(x?l.qtd*custoIns(x,new Set(vis)):0)},0)/i.rend}return i.custo||0}
+/* Detecção de ciclo em receitas: devolve os nomes do caminho (A → B → A) se o preparo `id`, com as linhas `linhas`, voltar a si mesmo; senão null */
+function cicloDe(id,linhas){const seen=new Set(),me=ins(id)||{id,nome:'este preparo',receita:[]};
+ const dfs=(x,path)=>{for(const l of(x.id===id?linhas:(x.receita||[]))){const y=ins(l.id);if(!y)continue;if(y.id===id)return[...path,y.nome];if(seen.has(y.id))continue;seen.add(y.id);const r=dfs(y,[...path,y.nome]);if(r)return r}return null};
+ return dfs(me,[me.nome])}
+function detectaCiclos(){const out=[],ks=new Set();(S.insumos||[]).forEach(i=>{if(!(i.receita&&i.receita.length))return;const c=cicloDe(i.id,i.receita);if(c){const k=[...new Set(c)].sort().join('|');if(!ks.has(k)){ks.add(k);out.push(c)}}});return out}
 function custoProd(p){if(p.ficha&&p.ficha.length)return p.ficha.reduce((a,l)=>{const x=ins(l.id);return a+(x?l.qtd*custoIns(x):0)},0);return p.custoManual||0}
 function baixa(itens,sign){ // sign=1 consome, -1 devolve
  itens.forEach(it=>{const p=prod(it.pid);if(!p||!p.ficha)return;p.ficha.forEach(l=>{const x=ins(l.id);if(x)x.estoque=r3(x.estoque-sign*l.qtd*it.qtd)})})}
 const r3=n=>Math.round(n*1000)/1000;
-function subtotal(itens){return r2(itens.reduce((a,i)=>{const p=prod(i.pid);return a+(p?p.preco*i.qtd:0)},0))}
+function subtotal(itens){return fromC(itens.reduce((a,i)=>{const p=prod(i.pid);return a+(p?linhaC(p.preco,i.qtd):0)},0))}
 function mkVenda(o){
  const itens=o.itens.map(i=>{const p=prod(i.pid);return{pid:p.id,nome:p.nome,qtd:i.qtd,preco:p.preco,custo:r2(custoProd(p))}});
- const sub=r2(itens.reduce((a,i)=>a+i.qtd*i.preco,0));
- const total=Math.max(0,r2(sub+(o.servico||0)-(o.desc||0)+(o.taxa||0)));
+ const sub=fromC(itens.reduce((a,i)=>a+linhaC(i.preco,i.qtd),0));
+ const total=fromC(Math.max(0,toC(sub)+toC(o.servico)-toC(o.desc)+toC(o.taxa)));
  const v={id:uid(),op:ui.user?ui.user.nome:'',n:S.seq++,data:o.data||new Date().toISOString(),tipo:o.tipo,local:o.local||'',canal:o.canal||'',cliente:o.cliente||'',itens,sub,serv:o.servico||0,desc:o.desc||0,taxa:o.taxa||0,total,pagamentos:o.pagamentos,troco:o.troco||0,notaId:null};
  S.vendas.push(v);return v}
 function dv11(s){let p=2,sum=0;for(let i=s.length-1;i>=0;i--){sum+=valCar(s[i])*p;p=p===9?2:p+1}const r=sum%11;return r<2?0:11-r}
@@ -204,8 +222,8 @@ function mkNota(v,doc,sim){
 function payloadNota(nota){const v=S.vendas.find(x=>x.id===nota.vendaId),c=S.cfg;
  return{ambiente:c.ambiente==='producao'?1:2,modelo:65,serie:nota.serie,numero:nota.numero,emitente:{cnpj:cnpjLimpo(c.cnpj),ie:c.ie,uf:c.uf,regime:c.regime,csc_id:c.cscId},
  destinatario:nota.doc?{documento:nota.doc}:null,
- itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,...fiscItem(p),unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.preco,valor_total:r2(i.qtd*i.preco)}}),
- pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:r2(v.serv+v.taxa),total:v.total}}
+ itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,...fiscItem(p),unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.preco,valor_total:fromC(linhaC(i.preco,i.qtd))}}),
+ pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:fromC(toC(v.serv)+toC(v.taxa)),total:v.total}}
 async function transmitir(nota){
  const c=S.cfg;
  if(CLOUD()){if(!navigator.onLine){nota.status='pendente';nota.msg='Sem internet: nota em fila, será transmitida ao reconectar.';return}
@@ -258,7 +276,7 @@ function seed(){
    for(let j=0;j<m;j++)itens.push({pid:nonkg[Math.floor(rnd()*nonkg.length)].id,qtd:1+Math.floor(rnd()*2)});
    if(rnd()<.35)itens.push({pid:'p7',qtd:r2(.35+rnd()*.4)});
    const t=rnd()<.6?'salao':rnd()<.5?'balcao':'delivery';
-   const sub=subtotal(itens);const serv=t==='salao'?r2(sub*.1):0;const taxa=t==='delivery'?6:0;
+   const sub=subtotal(itens);const serv=t==='salao'?fromC(pctC(toC(sub),10)):0;const taxa=t==='delivery'?6:0;
    const v=mkVenda({tipo:t,itens,local:t==='salao'?'Mesa '+(1+Math.floor(rnd()*12)):'',canal:t==='delivery'?(rnd()<.5?'iFood':'Próprio'):'',servico:serv,taxa,data:dt.toISOString(),pagamentos:[{forma:FORMAS[Math.floor(rnd()*5)],valor:r2(sub+serv+taxa)}]});
    if(rnd()<.55)mkNota(v,'',true)}}
  const ped=(canal,cliente,tel,end,itens,forma,status)=>({id:uid(),canal,cliente,tel,end,itens,taxa:6,forma,pago:forma==='Online',trocoPara:0,status,criado:new Date(Date.now()-mins0()*60000).toISOString(),entregador:'',baixado:status!=='novo',obs:''});
@@ -269,10 +287,10 @@ function seed(){
 /* ===== Cálculos de período ===== */
 function vendasDias(n){const lim=new Date();lim.setHours(0,0,0,0);lim.setDate(lim.getDate()-(n-1));return S.vendas.filter(v=>new Date(v.data)>=lim)}
 const vendasHoje=()=>vendasDias(1);
-const soma=(a,f)=>a.reduce((x,y)=>x+f(y),0);
+const soma=(a,f)=>fromC(a.reduce((x,y)=>x+toC(f(y)),0)); /* soma monetária exata: cada parcela vira centavo inteiro */
 const cmv=v=>soma(v.itens,i=>i.qtd*i.custo);
 function topProdutos(vs){const m={};vs.forEach(v=>v.itens.forEach(i=>{const k=i.nome;m[k]=m[k]||{nome:k,qtd:0,rec:0,custo:0};m[k].qtd+=i.qtd;m[k].rec+=i.qtd*i.preco;m[k].custo+=i.qtd*i.custo}));return Object.values(m).sort((a,b)=>b.rec-a.rec)}
-function caixaEsperado(){const c=S.caixa;if(!c.aberto)return 0;const ini=new Date(c.em);let d=c.abertura;S.vendas.filter(v=>new Date(v.data)>=ini).forEach(v=>v.pagamentos.filter(p=>p.forma==='Dinheiro').forEach(p=>d+=p.valor));c.movs.forEach(m=>d+=m.tipo==='suprimento'?m.valor:-m.valor);return r2(d)}
+function caixaEsperado(){const c=S.caixa;if(!c.aberto)return 0;const ini=new Date(c.em);let d=toC(c.abertura);S.vendas.filter(v=>new Date(v.data)>=ini).forEach(v=>v.pagamentos.filter(p=>p.forma==='Dinheiro').forEach(p=>d+=toC(p.valor)));c.movs.forEach(m=>d+=m.tipo==='suprimento'?toC(m.valor):-toC(m.valor));return fromC(d)}
 const baixos=()=>S.insumos.filter(i=>i.estoque<=i.min);
 const notasPend=()=>S.notas.filter(n=>n.status==='pendente'||n.status==='rejeitada');
 const cozItens=()=>{const out=[];S.comandas.forEach(c=>c.itens.forEach((it,k)=>{if(it.env&&!it.pronto)out.push({c,it,k})}));return out};
@@ -299,6 +317,7 @@ function vPainel(){
  const al=[];
  baixos().forEach(i=>al.push(chip('Estoque','warn')+` ${esc(i.nome)}: ${qf(i.estoque)} ${i.un} (mín. ${qf(i.min)})`));
  venc.forEach(c=>al.push(chip(c.venc<dayKey(Date.now())?'Vencida':'A vencer',c.venc<dayKey(Date.now())?'bad':'warn')+` ${esc(c.desc)} ${money(c.valor)} em ${dmy(c.venc+'T12:00')}`));
+ detectaCiclos().forEach(c=>al.push(chip('Receita','bad')+' Referência circular nas receitas: '+esc(c.join(' → '))+'. Corrija em Produção/Estoque.'));
  notasPend().forEach(n=>al.push(chip('Fiscal','bad')+` NFC-e ${n.numero} ${n.status}`));
  if(!S.caixa.aberto)al.push(chip('Caixa','bad')+' Caixa fechado: abra para receber pagamentos.');
  return head('Painel','Visão do dia',`<button class="btn pri" data-act="tab" data-k="salao">Abrir comandas</button><button class="btn" data-act="tab" data-k="delivery">Delivery</button>`)+
@@ -358,10 +377,10 @@ function vProducao(){
 function vFinanceiro(){
  const c=S.caixa;const dias=[];
  for(let d=-6;d<=7;d++){const x=new Date();x.setDate(x.getDate()+d);const k=dayKey(x);
-  const ent=d<=0?soma(S.vendas.filter(v=>dayKey(v.data)===k),v=>v.total):0;
-  const rec=S.contas.filter(a=>a.tipo==='receber'&&(a.pago?a.pagoEm===k:a.venc===k&&d>0)).reduce((a,b)=>a+b.valor,0);
-  const sai=S.contas.filter(a=>a.tipo==='pagar'&&(a.pago?a.pagoEm===k:a.venc===k&&d>0)).reduce((a,b)=>a+b.valor,0);
-  dias.push({l:x.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}),v:r2(ent+rec-sai),neg:ent+rec-sai<0})}
+  const ent=d<=0?toC(soma(S.vendas.filter(v=>dayKey(v.data)===k),v=>v.total)):0;
+  const rec=S.contas.filter(a=>a.tipo==='receber'&&(a.pago?a.pagoEm===k:a.venc===k&&d>0)).reduce((a,b)=>a+toC(b.valor),0);
+  const sai=S.contas.filter(a=>a.tipo==='pagar'&&(a.pago?a.pagoEm===k:a.venc===k&&d>0)).reduce((a,b)=>a+toC(b.valor),0);
+  dias.push({l:x.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}),v:fromC(ent+rec-sai),neg:ent+rec-sai<0})}
  const pend=t=>S.contas.filter(a=>a.tipo===t).sort((a,b)=>a.pago-b.pago||a.venc.localeCompare(b.venc));
  const tb=t=>`<div class="tw"><table><tr><th>Descrição</th><th>Vencimento</th><th class="r">Valor</th><th></th></tr>${pend(t).map(a=>`<tr><td>${esc(a.desc)}</td><td>${dmy(a.venc+'T12:00')}</td><td class="r">${money(a.valor)}</td><td>${a.pago?chip('pago','ok'):(a.venc<dayKey(Date.now())?chip('vencida','bad'):'')} ${a.pago?'':`<button class="btn sm" data-act="baixarconta" data-id="${a.id}">${t==='pagar'?'Pagar':'Receber'}</button>`}</td></tr>`).join('')}</table></div>`;
  return head('Financeiro','Caixa, contas a pagar e receber e fluxo de caixa.')+
@@ -439,7 +458,9 @@ function prePrint(src,k){return[S.cfg.nome,'PRÉ-CONTA '+(src.local||''),...src.
 
 /* ===== Pagamento ===== */
 const refSrc=r=>r.kind==='cmd'?S.comandas.find(c=>c.id===r.id):S.delivery.find(d=>d.id===r.id);
-function payCalc(){const p=ui.pay,src=refSrc(p.ref),sub=subtotal(src.itens),serv=p.servico?r2(sub*S.cfg.servicoPct/100):0,bruto=sub+serv,desc=r2(Math.min(bruto,p.dtipo==='%'?sub*p.dval/100:p.dval)),taxa=p.ref.kind==='del'?src.taxa:0,total=r2(bruto-desc+taxa),pago=r2(soma(p.pags,g=>g.valor));return{src,sub,serv,desc,taxa,total,pago,falta:r2(total-pago)}}
+function payCalc(){const p=ui.pay,src=refSrc(p.ref),subC=toC(subtotal(src.itens)),servC=p.servico?pctC(subC,S.cfg.servicoPct):0,brutoC=subC+servC,
+ descC=Math.max(0,Math.min(brutoC,p.dtipo==='%'?pctC(subC,p.dval):toC(p.dval))),taxaC=p.ref.kind==='del'?toC(src.taxa):0,totalC=brutoC-descC+taxaC,pagoC=p.pags.reduce((a,g)=>a+toC(g.valor),0);
+ return{src,sub:fromC(subC),serv:fromC(servC),desc:fromC(descC),taxa:fromC(taxaC),total:fromC(totalC),pago:fromC(pagoC),falta:fromC(totalC-pagoC)}}
 function openPay(ref){const src=refSrc(ref);const sal=ref.kind==='cmd'&&src.mesa;ui.pay={ref,servico:!!sal&&S.cfg.servicoPct>0,dtipo:'R$',dval:0,pags:[],emitir:false,doc:'',pessoas:src.pessoas||1};
  if(ref.kind==='del'){const k=payCalc();ui.pay.pags=[{forma:src.forma,valor:k.total,auto:true}]}drawPay()}
 function autoFix(){const p=ui.pay;if(p.pags.length===1&&p.pags[0].auto)p.pags[0].valor=payCalc().total}
@@ -463,8 +484,8 @@ async function confirmPay(){autoFix();const p=ui.pay,k=payCalc();
  if(k.falta>0.005)return toast('Ainda falta '+money(k.falta));
  if(p.emitir&&p.doc&&!(validaCPF(p.doc)||validaCNPJ(p.doc)))return toast('CPF ou CNPJ inválido.');
  if(p.emitir){const fp=fiscPend(refSrc(p.ref).itens);if(fp.length)return toast('NFC-e bloqueada: padrão fiscal sem validação do contador ou incompleto ('+fp.join('; ')+').')}
- let troco=r2(-k.falta),pags=p.pags.map(g=>({...g}));
- if(troco>0.005){const din=soma(pags.filter(g=>g.forma==='Dinheiro'),g=>g.valor);if(din<troco)return toast('O troco só pode sair de pagamento em dinheiro.');let rest=troco;pags.forEach(g=>{if(g.forma==='Dinheiro'&&rest>0){const t=Math.min(g.valor,rest);g.valor=r2(g.valor-t);rest=r2(rest-t)}});pags=pags.filter(g=>g.valor>0)}else troco=0;
+ let trocoC=Math.max(0,toC(-k.falta)),troco=fromC(trocoC),pags=p.pags.map(g=>({...g,valor:r2(g.valor)}));
+ if(trocoC>0){const dinC=pags.filter(g=>g.forma==='Dinheiro').reduce((a,g)=>a+toC(g.valor),0);if(dinC<trocoC)return toast('O troco só pode sair de pagamento em dinheiro.');let restC=trocoC;pags.forEach(g=>{if(g.forma==='Dinheiro'&&restC>0){const t=Math.min(toC(g.valor),restC);g.valor=fromC(toC(g.valor)-t);restC-=t}});pags=pags.filter(g=>toC(g.valor)>0)}else troco=0;
  const src=k.src,del=p.ref.kind==='del';
  if(CLOUD()&&navigator.onLine){try{S.seq=(await api('POST','/counter',{name:'venda'})).n}catch(e){}}
  const v=mkVenda({tipo:del?'delivery':src.mesa?'salao':'balcao',itens:src.itens.map(i=>({pid:i.pid,qtd:i.qtd})),local:src.local||'',canal:src.canal||'',cliente:src.cliente||'',servico:k.serv,desc:k.desc,taxa:k.taxa,pagamentos:pags,troco});
@@ -556,7 +577,7 @@ const A={
  edrm(d){syncEd();const e=ui.ed;(e.kind==='prod'?e.d.ficha:e.d.receita).splice(+d.k,1);drawEd()},
  edsave(){syncEd();const e=ui.ed,d=e.d;if(!d.nome.trim())return toast('Informe o nome.');
   if(e.kind==='prod'){if(d.preco<=0)return toast('Informe o preço.');d.ficha=d.ficha.filter(l=>l.qtd>0);let cod=(d.cod||'').trim();if(!cod){let n=101;while(S.produtos.some(p=>p.cod===String(n)))n++;cod=String(n)}if(S.produtos.some(p=>p.cod===cod&&p.id!==e.id))return toast('Já existe um produto com este código.');const o={id:e.id||'p'+uid(),cod,nome:d.nome.trim(),cat:d.cat||'Outros',preco:d.preco,tipo:d.tipo,custoManual:d.custoManual,ncm:d.ncm,cfop:d.cfop,csosn:d.csosn,ficha:d.ficha};if(e.id)S.produtos[S.produtos.findIndex(p=>p.id===e.id)]=o;else S.produtos.push(o)}
-  else{const o={id:e.id||'i'+uid(),nome:d.nome.trim(),un:d.un,estoque:d.estoque,min:d.min,custo:d.custo};if(d.prep){o.receita=d.receita.filter(l=>l.qtd>0);o.rend=d.rend>0?d.rend:1}
+  else{if(d.prep&&e.id){const cc=cicloDe(e.id,d.receita.filter(l=>l.qtd>0));if(cc)return toast('Receita circular: '+cc.join(' → ')+'. Remova um dos itens para salvar.')}const o={id:e.id||'i'+uid(),nome:d.nome.trim(),un:d.un,estoque:d.estoque,min:d.min,custo:d.custo};if(d.prep){o.receita=d.receita.filter(l=>l.qtd>0);o.rend=d.rend>0?d.rend:1}
    if(e.id){const old=ins(e.id);o.estoque=old.estoque;S.insumos[S.insumos.findIndex(i=>i.id===e.id)]=o}else S.insumos.push(o)}
   logA(e.kind==='prod'?'Produto salvo':'Insumo salvo',d.nome.trim());save();ui.ed=null;hideModal();toast('Salvo.')},
  eddel(){const e=ui.ed;if(e.kind==='ins'){const u=S.produtos.some(p=>p.ficha.some(l=>l.id===e.id))||S.insumos.some(i=>(i.receita||[]).some(l=>l.id===e.id));if(u)return toast('Insumo usado em ficha técnica: remova de lá antes.');}
@@ -845,14 +866,13 @@ const gjNd=(a,b)=>Math.max(1,Math.round((new Date(b+'T00:00:00')-new Date(a+'T00
 function gjCalc(ini,fim,diasMap){
  const g=GJ(),cap=GJ_CAP(S.cfg.regime),nd=gjNd(ini,fim);
  const vs=S.vendas.filter(v=>{const k=dayKey(v.data);return k>=ini&&k<=fim});
- const serv=r2(vs.reduce((a,v)=>a+(v.serv||0),0));
- const lanc=r2((S.gorjLanc||[]).filter(l=>l.data>=ini&&l.data<=fim).reduce((a,l)=>a+l.valor,0));
- const total=r2(serv+lanc),ret=r2(total*g.retPct/100),dist=r2(total-ret);
+ const servC=vs.reduce((a,v)=>a+toC(v.serv),0),lancC=(S.gorjLanc||[]).filter(l=>l.data>=ini&&l.data<=fim).reduce((a,l)=>a+toC(l.valor),0);
+ const totalC=servC+lancC,retC=pctC(totalC,g.retPct),distC=totalC-retC,serv=fromC(servC),lanc=fromC(lancC),total=fromC(totalC),ret=fromC(retC),dist=fromC(distC);
  const eq=(S.gorjEquipe||[]).filter(m=>m.ativo!==false).map(m=>{const f=g.funcoes.find(x=>x.id===m.funcao)||{nome:'(sem função)',pontos:0};
   const dias=diasMap&&diasMap[m.id]!=null&&diasMap[m.id]!==''?Math.max(0,Math.min(nd,num(diasMap[m.id]))):nd;
   const pts=g.criterio==='igual'?(f.pontos>0?1:0):f.pontos;return{id:m.id,nome:m.nome,funcao:f.nome,pontos:pts,dias,peso:pts*dias,valor:0}});
  const W=eq.reduce((a,e)=>a+e.peso,0);
- if(W>0){const cents=Math.round(dist*100);let alloc=0;eq.forEach(e=>{e.raw=cents*e.peso/W;e.c=Math.floor(e.raw+1e-9);alloc+=e.c});let resto=cents-alloc;
+ if(W>0){const cents=distC;let alloc=0;eq.forEach(e=>{e.raw=cents*e.peso/W;e.c=Math.floor(e.raw+1e-9);alloc+=e.c});let resto=cents-alloc;
   eq.slice().sort((a,b)=>(b.raw-b.c)-(a.raw-a.c)||a.nome.localeCompare(b.nome)).forEach(e=>{if(resto>0&&e.peso>0){e.c++;resto--}});eq.forEach(e=>e.valor=e.c/100)}
  return{ini,fim,nd,vendas:vs.length,serv,lanc,total,ret,dist,eq,W,cap}}
 function gjAlertas(){const g=GJ(),a=[],hoje=dayKey(Date.now()),cap=GJ_CAP(S.cfg.regime);
@@ -909,8 +929,8 @@ function fiscPerfil(id){return((S.cfg.fisc||{}).perfis||[]).find(x=>x.id===id)}
 function fiscItem(p){const pf=p.pf&&fiscPerfil(p.pf);return pf?{ncm:p.ncm,cest:pf.cest,cfop:pf.cfop,csosn:pf.csosn,cst_pis:pf.cstPis,cst_cofins:pf.cstCofins,origem:pf.origem}:{ncm:p.ncm,cfop:p.cfop,csosn:p.csosn}}
 function fiscPend(itens){if(S.cfg.ambiente!=='producao')return[];const out=new Set();(itens||[]).forEach(i=>{const p=prod(i.pid);const pf=p&&p.pf&&fiscPerfil(p.pf);if(!pf)return;if(pf.status!=='validado'||!pf.cfop||!pf.csosn||!pf.cstPis||!pf.cstCofins)out.add(pf.nome)});return[...out]}
 function fiscApur(mes){const out={},tot={v:0};
- S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).forEach(v=>v.itens.forEach(i=>{const p=prod(i.pid)||{};const pf=p.pf&&fiscPerfil(p.pf);const k=pf?pf.id:'_sem';const val=r2(i.qtd*i.preco);out[k]=r2((out[k]||0)+val);tot.v=r2(tot.v+val)}));
- const serv=r2(S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).reduce((a,v)=>a+(v.serv||0),0));return{out,total:tot.v,serv}}
+ S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).forEach(v=>v.itens.forEach(i=>{const p=prod(i.pid)||{};const pf=p.pf&&fiscPerfil(p.pf);const k=pf?pf.id:'_sem';const val=linhaC(i.preco,i.qtd);out[k]=(out[k]||0)+val;tot.v+=val}));
+ const serv=soma(S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes),v=>v.serv||0);Object.keys(out).forEach(k=>out[k]=fromC(out[k]));return{out,total:fromC(tot.v),serv}}
 const SIMNAO={sim:'Sim',nao:'Não',revisar:'A definir com o contador'};
 function vPadroes(){
  const F=S.cfg.fisc,ro=!can('padraofisc'),dz=ro?' disabled':'';if(!ui.fmes)ui.fmes=dayKey(Date.now()).slice(0,7);
