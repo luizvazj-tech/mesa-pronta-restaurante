@@ -65,7 +65,7 @@ tr.low td{background:var(--warnbg)}
 .mesa{all:unset;box-sizing:border-box;cursor:pointer;border:2px solid var(--line);background:var(--surface);border-radius:12px;padding:12px;min-height:92px;display:flex;flex-direction:column;justify-content:space-between}
 .mesa:focus-visible{outline:2px solid var(--accent)}
 .mesa b{font-family:var(--fd);font-size:1.2rem}
-.mesa.occ{border-color:var(--accent);background:var(--warnbg)}
+.mesa.occ{border-color:var(--accent);background:var(--warnbg)}.mesa.conta{border-color:var(--bad);box-shadow:0 0 0 2px var(--badbg)}.mesa small{font-size:.78rem}
 .kan{display:grid;grid-template-columns:repeat(5,minmax(210px,1fr));gap:10px;overflow-x:auto;padding-bottom:8px}
 .col{background:var(--surface2);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:200px}
 .col h3{display:flex;justify-content:space-between}
@@ -160,7 +160,7 @@ const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
 const LS='mesa_pronta_v1';
 let S,ui={user:null,pdv:null,pdvNfce:false,eu:null,fails:0,lockUntil:0,last:Date.now(),tab:'painel',cat:'Todos',q:'',cmd:null,pay:null,ed:null,dn:null,relPer:7,chat:[],storageOk:true,iaq:''};
 function testStorage(){try{localStorage.setItem('__t','1');localStorage.removeItem('__t');return true}catch(e){return false}}
-function migra(o){o.users=o.users||defaultUsers();o.audit=o.audit||[];o.gorjEquipe=o.gorjEquipe||[];o.gorjLanc=o.gorjLanc||[];o.gorjFech=o.gorjFech||[];o.cfg.gorj=o.cfg.gorj||gorjDef(o.cfg.regime);o.cfg.fisc=o.cfg.fisc||fiscDef();o.cfg.bloqueioMin=o.cfg.bloqueioMin||10;const used=new Set();o.produtos.forEach((p,i)=>{if(!p.cod||used.has(p.cod)){let n=101+i;while(used.has(String(n)))n++;p.cod=String(n)}used.add(p.cod)});return o}
+function migra(o){o.users=o.users||defaultUsers();o.audit=o.audit||[];if(!o.mesas)o.mesas=Array.from({length:Math.max(0,Math.min(60,+o.cfg.mesas||0))},(_,i)=>mkMesa(i+1));o.gorjEquipe=o.gorjEquipe||[];o.gorjLanc=o.gorjLanc||[];o.gorjFech=o.gorjFech||[];o.cfg.gorj=o.cfg.gorj||gorjDef(o.cfg.regime);o.cfg.fisc=o.cfg.fisc||fiscDef();o.cfg.bloqueioMin=o.cfg.bloqueioMin||10;const used=new Set();o.produtos.forEach((p,i)=>{if(!p.cod||used.has(p.cod)){let n=101+i;while(used.has(String(n)))n++;p.cod=String(n)}used.add(p.cod)});return o}
 function load(){ui.storageOk=testStorage();if(ui.storageOk){try{const r=localStorage.getItem(LS);if(r){const o=JSON.parse(r);if(o&&o.v===1)return migra(o)}}catch(e){}}return seed()}
 function save(){if(CLOUD()){cloudSaved();return}if(!ui.storageOk)return;try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){ui.storageOk=false}}
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200)}
@@ -175,12 +175,12 @@ const sha256=(()=>{const K=[],H0=[];let c=0;for(let n=2;c<64;n++){let p=true;for
  return H.map(x=>x.toString(16).padStart(8,'0')).join('')}})();
 const hashPin=(id,pin)=>sha256('mp:'+id+':'+pin);
 const PERFIS={dono:{nome:'Proprietário',tabs:'*',can:'*'},
- gerente:{nome:'Gerente',tabs:['painel','pdv','salao','delivery','cozinha','produtos','estoque','producao','financeiro','fiscal','relatorios','assistente','acesso'],can:['desconto','cancelar','sangria','cancnota','fechacaixa','contas','ajusteest']},
+ gerente:{nome:'Gerente',tabs:['painel','pdv','salao','delivery','cozinha','produtos','estoque','producao','financeiro','fiscal','relatorios','assistente','acesso'],can:['desconto','cancelar','sangria','cancnota','fechacaixa','contas','ajusteest','mesas']},
  caixa:{nome:'Operador de caixa',tabs:['pdv','salao','delivery','financeiro','fiscal'],can:['fechacaixa']},
  garcom:{nome:'Garçom',tabs:['salao','cozinha'],can:[]},
  cozinha:{nome:'Cozinha',tabs:['cozinha','estoque','producao'],can:['ajusteest']}};
-const ACOES={desconto:'dar desconto',cancelar:'cancelar item, comanda ou pedido',sangria:'registrar sangria',cancnota:'cancelar NFC-e',fechacaixa:'fechar o caixa',contas:'ver contas a pagar e receber',ajusteest:'ajustar estoque'};
-const PERM_TXT={desconto:'Dar desconto',cancelar:'Cancelar itens e pedidos',sangria:'Sangria',cancnota:'Cancelar NFC-e',contas:'Ver contas a pagar',ajusteest:'Perdas e contagem de estoque',usuarios:'Gerenciar usuários'};
+const ACOES={desconto:'dar desconto',cancelar:'cancelar item, comanda ou pedido',sangria:'registrar sangria',cancnota:'cancelar NFC-e',fechacaixa:'fechar o caixa',contas:'ver contas a pagar e receber',ajusteest:'ajustar estoque',mesas:'gerenciar mesas'};
+const PERM_TXT={desconto:'Dar desconto',cancelar:'Cancelar itens e pedidos',sangria:'Sangria',cancnota:'Cancelar NFC-e',contas:'Ver contas a pagar',ajusteest:'Perdas e contagem de estoque',mesas:'Cadastrar e excluir mesas',usuarios:'Gerenciar usuários'};
 const canP=(perfil,a)=>{const p=PERFIS[perfil];if(!p)return false;if(a==='usuarios'||a==='regragorj'||a==='padraofisc')return perfil==='dono';return p.can==='*'||p.can.includes(a)};
 const can=a=>!!ui.user&&canP(ui.user.perfil,a);
 const tabOk=t=>!!ui.user&&(PERFIS[ui.user.perfil].tabs==='*'||PERFIS[ui.user.perfil].tabs.includes(t));
@@ -265,6 +265,7 @@ function seed(){
  caixa:{aberto:true,abertura:200,em:new Date().toISOString(),movs:[],op:'Proprietário'},caixaHist:[],producao:[],movEst:[],audit:[],users:defaultUsers()};
  produtos.forEach((p,i)=>p.cod=String(101+i));
  s.cfg.gorj=gorjDef(s.cfg.regime);s.cfg.fisc=fiscDef();produtos.forEach(p=>{p.pf=(p.id==='p8'||p.id==='p10')?'pf_bebida_st':p.id==='p9'?'pf_bebida_prep':'pf_refeicao'});
+ s.mesas=Array.from({length:Math.max(1,+s.cfg.mesas||10)},(_,i)=>mkMesa(i+1,{area:i<8?'Salão':'Varanda',lugares:i%3===0?6:4}));
  s.gorjEquipe=[['Garçom (exemplo 1)','f1'],['Garçom (exemplo 2)','f1'],['Cozinheiro (exemplo)','f3'],['Caixa (exemplo)','f4']].map(([nome,funcao])=>({id:uid(),nome,funcao,ativo:true}));s.gorjLanc=[];s.gorjFech=[];
  S=s;
  let sv=7;const rnd=()=>{sv=(sv*16807)%2147483647;return sv/2147483647};
@@ -327,13 +328,6 @@ function vPainel(){
  <div class="card" style="margin-top:12px"><h2>Últimas vendas</h2><div class="tw">${tblVendas(S.vendas.slice(-8).reverse())}</div></div>`}
 
 function tblVendas(vs){return`<table><tr><th>Nº</th><th>Hora</th><th>Tipo</th><th>Local/canal</th><th>Pagamento</th><th class="r">Total</th><th>Operador</th><th>NFC-e</th></tr>${vs.map(v=>{const n=S.notas.find(x=>x.id===v.notaId);return`<tr><td>${v.n}</td><td>${dmy(v.data)} ${hhmm(v.data)}</td><td>${esc(v.tipo)}</td><td>${esc(v.local||v.canal||'-')}</td><td>${esc(v.pagamentos.map(p=>p.forma).join(' + '))}</td><td class="r">${money(v.total)}</td><td>${esc(v.op||'-')}</td><td>${n?chip(n.status+' '+n.numero,n.status==='autorizada'?'ok':n.status==='cancelada'?'':'bad'):chip('sem nota')}</td></tr>`}).join('')}</table>`}
-
-function vSalao(){
- const ms=[];for(let i=1;i<=S.cfg.mesas;i++){const c=S.comandas.find(x=>x.mesa===i);ms.push(`<button class="mesa ${c?'occ':''}" data-act="mesa" data-m="${i}"><b>Mesa ${i}</b><span>${c?money(subtotal(c.itens))+' · '+mins(c.aberta)+' min':'Livre'}</span></button>`)}
- const bal=S.comandas.filter(c=>!c.mesa&&!c.pdv);
- return head('Salão e comandas','Abra uma mesa para lançar consumo; feche a conta com ou sem NFC-e.',`<button class="btn acc" data-act="balcao">Nova venda no balcão</button>`)+
- `<div class="mesas">${ms.join('')}</div>`+
- (bal.length?`<div class="card" style="margin-top:14px"><h2>Vendas em aberto no balcão</h2>${bal.map(c=>`<div class="row" style="margin:6px 0"><b>${esc(c.local)}</b><span class="muted">${money(subtotal(c.itens))}</span><button class="btn sm right" data-act="opencmd" data-id="${c.id}">Abrir</button></div>`).join('')}</div>`:'')}
 
 function vDelivery(){
  const ped=S.delivery;
@@ -426,7 +420,7 @@ function vAssistente(){
 function vConfig(){
  const c=S.cfg;
  return head('Configurações')+
- `<div class="card"><h2>Estabelecimento</h2><div class="form">${field('Nome','k_nome',c.nome,'data-chg="cfg" data-k="nome"')}${field('Taxa de serviço (%)','k_srv',c.servicoPct,'data-chg="cfgn" data-k="servicoPct"')}${field('Taxa de entrega padrão (R$)','k_ent',c.taxaEntrega,'data-chg="cfgn" data-k="taxaEntrega"')}${field('Quantidade de mesas','k_mesas',c.mesas,'data-chg="cfgn" data-k="mesas"')}${field('ID do restaurante no iFood','k_if',c.ifoodMerchant,'data-chg="cfg" data-k="ifoodMerchant"')}</div></div>
+ `<div class="card"><h2>Estabelecimento</h2><div class="form">${field('Nome','k_nome',c.nome,'data-chg="cfg" data-k="nome"')}${field('Taxa de serviço (%)','k_srv',c.servicoPct,'data-chg="cfgn" data-k="servicoPct"')}${field('Taxa de entrega padrão (R$)','k_ent',c.taxaEntrega,'data-chg="cfgn" data-k="taxaEntrega"')}<label>Mesas<span class="muted" style="display:block">Cadastre, edite e exclua em Salão → Gerenciar mesas.</span></label>${field('ID do restaurante no iFood','k_if',c.ifoodMerchant,'data-chg="cfg" data-k="ifoodMerchant"')}</div></div>
  ${CLOUD()?'<div class="card" style="margin-top:12px"><h2>Dados</h2><p>Os dados deste restaurante ficam no servidor e são sincronizados entre todos os computadores. Cópias de segurança são feitas pelo banco de dados da AWS.</p><div class="row"><button class="btn" data-act="backup">Gerar backup deste computador</button></div></div>':`<div class="card" style="margin-top:12px"><h2>Dados</h2><div class="row"><button class="btn" data-act="zerar">Limpar vendas, pedidos e contas de demonstração</button><button class="btn" data-act="backup">Gerar backup</button><button class="btn bad" data-act="resetall">Restaurar demonstração completa</button></div>
  <label style="margin-top:10px">Backup (copie e guarde; para restaurar, cole aqui e use o botão)<textarea id="bk" rows="4" placeholder="Cole aqui um backup JSON"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="restaurar">Restaurar do texto colado</button></div></div>`}
  <div class="card" style="margin-top:12px"><h2>Limites desta versão</h2><p>Os dados ficam neste navegador e funcionam sem internet. Para vários caixas e tablets sincronizados, rastreio de entregador, integração real com iFood e transmissão fiscal efetiva, é preciso hospedar o sistema com banco de dados e servidor próprios.</p></div>`}
@@ -445,13 +439,13 @@ const curCmd=()=>S.comandas.find(c=>c.id===ui.cmd);
 function gridHtml(){const q=norm(ui.q);return S.produtos.filter(p=>(ui.cat==='Todos'||p.cat===ui.cat)&&(!q||norm(p.nome).includes(q))).map(p=>`<button class="pb" data-act="addp" data-id="${p.id}"><b>${esc(p.nome)}</b><span>${money(p.preco)}${p.tipo==='kg'?' /kg':''}</span></button>`).join('')||'<span class="muted">Nenhum produto.</span>'}
 function drawCmd(){const c=curCmd();if(!c){hideModal();return}
  const cats=['Todos',...new Set(S.produtos.map(p=>p.cat))];const sub=subtotal(c.itens);const naoEnv=c.itens.filter(i=>!i.env).length;
- showModal(`<div class="mh"><h2>${esc(c.local)} <span class="muted" style="font-size:.9rem">aberta há ${mins(c.aberta)} min</span></h2><button class="btn sm" data-act="close">Fechar janela</button></div>
+ showModal(`<div class="mh"><h2>${esc(c.local)} ${c.conta?chip('conta pedida','warn'):''} <span class="muted" style="font-size:.9rem">aberta há ${mins(c.aberta)} min${c.gar?' · '+esc(c.gar):''}</span></h2><button class="btn sm" data-act="close">Fechar janela</button></div>
  <div class="cmdgrid"><div><input id="pq" data-inp="q" placeholder="Buscar produto" value="${esc(ui.q)}" style="margin-bottom:8px"><div class="cats">${cats.map(k=>`<button class="btn sm ${ui.cat===k?'on':''}" data-act="cat" data-k="${esc(k)}">${esc(k)}</button>`).join('')}</div><div class="pg" id="pgrid">${gridHtml()}</div></div>
- <div class="card"><h3>Consumo</h3>${c.itens.map((it,k)=>{const p=prod(it.pid);return`<div class="item"><div><b>${esc(p.nome)}</b> ${it.env?chip(it.pronto?'pronto':'na cozinha',it.pronto?'ok':'warn'):''}<br><span class="muted">${money(p.preco*it.qtd)}</span></div>
+ <div class="card"><h3>Consumo</h3>${c.itens.map((it,k)=>{const p=prod(it.pid);return`<div class="item"><div><b>${esc(p.nome)}</b> ${it.env?(it.servido?chip('servido','ok'):it.pronto?`<button class="btn sm" data-act="servir" data-k="${k}">Pronto: marcar servido</button>`:chip('na cozinha','warn')):''}<br><span class="muted">${money(p.preco*it.qtd)}</span></div>
  <div class="qty">${p.tipo==='kg'?`<input value="${qf(it.qtd)}" data-chg="kg" data-k="${k}" inputmode="decimal" aria-label="Peso em kg"> kg`:`<button class="btn sm" data-act="qty" data-k="${k}" data-d="-1">-</button><b>${it.qtd}</b><button class="btn sm" data-act="qty" data-k="${k}" data-d="1">+</button>`}<button class="btn sm bad" data-act="rmitem" data-k="${k}" aria-label="Remover">x</button></div>
  <input value="${esc(it.obs||'')}" data-chg="obs" data-k="${k}" placeholder="Observação (ex.: sem cebola)" style="grid-column:1/-1"></div>`}).join('')||'<p class="muted">Toque em um produto para lançar.</p>'}
  <div class="row" style="margin:10px 0"><label style="width:110px">Pessoas<input value="${c.pessoas||1}" data-chg="pessoas" inputmode="numeric"></label><div class="right" style="text-align:right"><span class="muted">Subtotal</span><br><b style="font-size:1.3rem">${money(sub)}</b></div></div>
- <div class="row"><button class="btn" data-act="sendk" ${naoEnv?'':'disabled'}>Enviar à cozinha (${naoEnv})</button><button class="btn" data-act="prec">Copiar pré-conta</button><button class="btn pri" data-act="fechar" ${c.itens.length?'':'disabled'}>Fechar conta</button><button class="btn bad" data-act="cancmd">Cancelar</button></div></div></div>`,true)}
+ <div class="row"><button class="btn" data-act="sendk" ${naoEnv?'':'disabled'}>Enviar à cozinha (${naoEnv})</button><button class="btn" data-act="prec">Copiar pré-conta</button>${c.pdv?'':`<button class="btn" data-act="mvopen" data-mode="transf">Transferir</button><button class="btn" data-act="mvopen" data-mode="juntar">Juntar</button><button class="btn" data-act="pconta">${c.conta?'Reabrir consumo':'Pedir conta'}</button>`}<button class="btn pri" data-act="fechar" ${c.itens.length?'':'disabled'}>Fechar conta</button><button class="btn bad" data-act="cancmd">Cancelar</button></div></div></div>`,true)}
 
 function addProd(id){const c=curCmd(),p=prod(id);if(p.tipo==='kg'){c.itens.push({pid:id,qtd:0.5,obs:'',env:null,pronto:false});}else{const e=c.itens.find(i=>i.pid===id&&!i.env&&!i.obs);if(e)e.qtd++;else c.itens.push({pid:id,qtd:1,obs:'',env:null,pronto:false})}save();drawCmd()}
 function prePrint(src,k){return[S.cfg.nome,'PRÉ-CONTA '+(src.local||''),...src.itens.map(i=>`${qf(i.qtd)} x ${prod(i.pid).nome}  ${money(prod(i.pid).preco*i.qtd)}`),'Subtotal: '+money(subtotal(src.itens)),'Taxa de serviço opcional: '+S.cfg.servicoPct+'%'].join('\n')}
@@ -720,7 +714,7 @@ setInterval(()=>{if(ui.user&&Date.now()-ui.last>S.cfg.bloqueioMin*60000)A.lock()
 /* ===== Modo nuvem (AWS Lambda): login no servidor, sincronização entre dispositivos e fila offline ===== */
 function CLOUD(){return !!(typeof window!=='undefined'&&window.MP_API)}
 const cloud={tok:null,slug:'',tenant:null,cs:0,snap:{},busy:false,timer:null,pt:null,status:'idle',pub:[]};
-const SYNC_ARR=['produtos','insumos','comandas','vendas','delivery','entregadores','notas','contas','producao','movEst','caixaHist','audit','gorjEquipe','gorjLanc','gorjFech'];
+const SYNC_ARR=['produtos','insumos','comandas','vendas','delivery','entregadores','notas','contas','producao','movEst','caixaHist','audit','gorjEquipe','gorjLanc','gorjFech','mesas'];
 const SYNC_ALL=[...SYNC_ARR,'cfg','caixa'];
 const FISCAL_KEYS=['url','token','provedor'];
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
@@ -739,7 +733,7 @@ async function api(method,path,body,query){
 
 /* estado inicial de um restaurante novo */
 function blankState(nome){return{v:1,seq:1,cfg:{nome:nome||'',cnpj:'',ie:'',uf:'PR',regime:'Simples Nacional',serie:1,proxNum:1,ambiente:'homologacao',csc:'',cscId:'',provedor:'simulado',url:'',token:'',servicoPct:10,taxaEntrega:6,mesas:12,ifoodMerchant:'',bloqueioMin:10},
- insumos:[],produtos:[],comandas:[],vendas:[],delivery:[],entregadores:[],notas:[],contas:[],caixa:{aberto:false,abertura:0,em:'',movs:[]},caixaHist:[],producao:[],movEst:[],audit:[],gorjEquipe:[],gorjLanc:[],gorjFech:[],users:[]}}
+ insumos:[],produtos:[],comandas:[],vendas:[],delivery:[],entregadores:[],notas:[],contas:[],caixa:{aberto:false,abertura:0,em:'',movs:[]},caixaHist:[],producao:[],movEst:[],audit:[],gorjEquipe:[],gorjLanc:[],gorjFech:[],mesas:[],users:[]}}
 function catalogOnly(nome){const s=seed();s.cfg.nome=nome;s.cfg.cnpj='';s.cfg.ie='';['vendas','notas','delivery','comandas','contas','producao','movEst','audit','caixaHist','entregadores','gorjEquipe','gorjLanc','gorjFech'].forEach(k=>s[k]=[]);s.caixa={aberto:false,abertura:0,em:'',movs:[]};s.seq=1;s.users=[];return s}
 
 /* cache local (permite operar sem internet) */
@@ -1000,6 +994,67 @@ Object.assign(A,{
   const inc=pend.filter(p=>!p.cfop||!p.csosn||!p.cstPis||!p.cstCofins);if(inc.length)return toast('Complete CFOP, CSOSN e CST de PIS/COFINS em: '+inc.map(p=>p.nome).join('; '));
   askConfirm('Confirma que '+V.contador+' (CRC '+V.crc+') revisou e validou '+pend.length+' padrão(ões) fiscal(is)?',()=>{pend.forEach(p=>{p.status='validado';p.valPor=V.contador;p.valCrc=V.crc;p.valData=dt});V.status='validado';V.data=dt;V.hist=(V.hist||[]).concat([{data:dt,contador:V.contador,crc:V.crc,n:pend.length}]);logA('Padrões fiscais validados pelo contador',V.contador+' · CRC '+V.crc+' · '+pend.length);save();render();toast('Validação registrada.')})},
  fcsv(){const F=S.cfg.fisc,ap=fiscApur(ui.fmes);copyText(['padrao;icms_st;monofasico;receita',...F.perfis.filter(p=>ap.out[p.id]).map(p=>[p.nome,SIMNAO[p.st],SIMNAO[p.mono],String(ap.out[p.id]).replace('.',',')].join(';')),...(ap.out._sem?[['Sem padrão','-','-',String(ap.out._sem).replace('.',',')].join(';')]:[]),'taxa_servico_arrecadada;;;'+String(ap.serv).replace('.',',')].join('\n'))}});
+/* ===== Salão: mesas cadastráveis, áreas, transferência, junção e conta pedida ===== */
+const mkMesa=(num,o)=>Object.assign({id:'m'+num,num,nome:'',lugares:4,area:'Salão',ativa:true},o);
+const mesaPorNum=n=>(S.mesas||[]).find(m=>m.num===n);
+const rotuloMesa=m=>m.nome?`Mesa ${m.num} · ${m.nome}`:`Mesa ${m.num}`;
+const cmdDaMesa=n=>S.comandas.find(x=>x.mesa===n&&!x.pdv);
+const prontosNaoServidos=c=>c.itens.filter(i=>i.env&&i.pronto&&!i.servido).length;
+const needM=()=>{if(!can('mesas')){toast('Seu perfil não pode cadastrar ou excluir mesas.');return false}return true};
+function vSalao(){
+ if(ui.gm&&can('mesas'))return vMesasGer();
+ const ms=(S.mesas||[]).filter(m=>m.ativa!==false).sort((a,b)=>a.num-b.num),areas=[...new Set(ms.map(m=>m.area||'Salão'))];
+ const fa=areas.includes(ui.area)?ui.area:'Todas',vis=ms.filter(m=>fa==='Todas'||(m.area||'Salão')===fa);
+ const ocup=ms.filter(m=>cmdDaMesa(m.num)),emConsumo=soma(ocup,m=>subtotal(cmdDaMesa(m.num).itens)),contas=ocup.filter(m=>cmdDaMesa(m.num).conta).length;
+ const card=m=>{const c=cmdDaMesa(m.num),pr=c?prontosNaoServidos(c):0;
+  return`<button class="mesa ${c?'occ':''} ${c&&c.conta?'conta':''}" data-act="mesa" data-m="${m.num}"><div><b>${esc(rotuloMesa(m))}</b><small class="muted" style="display:block">${esc(m.area||'Salão')} · ${m.lugares} lugares</small></div>
+  <div>${c?`<span>${money(subtotal(c.itens))} · ${mins(c.aberta)} min</span><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${c.conta?chip('conta pedida','warn'):''}${pr?chip(pr+' pronto'+(pr>1?'s':''),'ok'):''}${c.gar?`<small class="muted">${esc(c.gar)}</small>`:''}</div>`:'<span class="muted">Livre</span>'}</div></button>`};
+ const orf=S.comandas.filter(c=>!c.pdv&&(!c.mesa||!mesaPorNum(c.mesa)));
+ return head('Salão e comandas','Abra uma mesa para lançar consumo; feche a conta com ou sem NFC-e.',`${can('mesas')?'<button class="btn" data-act="mesager">Gerenciar mesas</button> ':''}<button class="btn acc" data-act="balcao">Nova venda no balcão</button>`)+
+ `<div class="grid g4">${kpi('Mesas livres',ms.length-ocup.length,'de '+ms.length+' ativas')}${kpi('Ocupadas',ocup.length)}${kpi('Em consumo',money(emConsumo))}${kpi('Contas pedidas',contas)}</div>`+
+ (areas.length>1?`<div class="cats" style="margin-top:12px">${['Todas',...areas].map(a=>`<button class="btn sm ${fa===a?'on':''}" data-act="area" data-k="${esc(a)}">${esc(a)}</button>`).join('')}</div>`:'')+
+ (ms.length?`<div class="mesas" style="margin-top:12px">${vis.map(card).join('')}</div>`:`<div class="card" style="margin-top:12px"><p>Nenhuma mesa cadastrada.</p>${can('mesas')?'<button class="btn pri" data-act="mesager">Cadastrar mesas</button>':'<p class="muted">Peça ao gerente ou ao proprietário para cadastrar as mesas.</p>'}</div>`)+
+ (orf.length?`<div class="card" style="margin-top:14px"><h2>Balcão e comandas sem mesa cadastrada</h2>${orf.map(c=>`<div class="row" style="margin:6px 0"><b>${esc(c.local)}</b><span class="muted">${money(subtotal(c.itens))}</span><button class="btn sm right" data-act="opencmd" data-id="${c.id}">Abrir</button></div>`).join('')}</div>`:'')}
+function vMesasGer(){
+ const ms=(S.mesas||[]).slice().sort((a,b)=>a.num-b.num),prox=ms.reduce((a,m)=>Math.max(a,m.num),0)+1,areas=[...new Set(ms.map(m=>m.area||'Salão'))];
+ return head('Gerenciar mesas','Inclua, ajuste ou exclua mesas. Mesa com comanda aberta não pode ser excluída nem desativada.',`<button class="btn" data-act="mesavoltar">Voltar ao salão</button>`)+
+ `<div class="card"><h2>Adicionar mesa</h2><datalist id="dl_area">${areas.map(a=>`<option value="${esc(a)}">`).join('')}</datalist><div class="form">
+ ${field('Número','mn_num',String(prox),'inputmode="numeric" maxlength="3"')}${field('Nome (opcional)','mn_nome','','placeholder="Ex.: Varanda, Janela"')}${field('Área','mn_area',areas[0]||'Salão','list="dl_area"')}${field('Lugares','mn_lug','4','inputmode="numeric" maxlength="2"')}</div>
+ <div class="row" style="margin-top:10px"><button class="btn pri" data-act="mesaadd">Adicionar mesa</button></div>
+ <h3 style="margin-top:14px">Criar várias de uma vez</h3><div class="form">${field('Quantidade','ml_qtd','5','inputmode="numeric" maxlength="2"')}${field('Área','ml_area',areas[0]||'Salão','list="dl_area"')}${field('Lugares por mesa','ml_lug','4','inputmode="numeric" maxlength="2"')}</div>
+ <div class="row" style="margin-top:10px"><button class="btn" data-act="mesalote">Criar a partir da mesa ${prox}</button></div></div>
+ <div class="card" style="margin-top:12px"><h2>Mesas cadastradas (${ms.length})</h2><div class="tw"><table><tr><th>Nº</th><th>Nome</th><th>Área</th><th class="r">Lugares</th><th>Ativa</th><th></th></tr>
+ ${ms.map(m=>{const c=cmdDaMesa(m.num);return`<tr><td><b>${m.num}</b></td><td><input value="${esc(m.nome)}" data-chg="mesaf" data-id="${m.id}" data-k="nome" aria-label="Nome da mesa ${m.num}"></td><td><input value="${esc(m.area||'Salão')}" list="dl_area" data-chg="mesaf" data-id="${m.id}" data-k="area" aria-label="Área da mesa ${m.num}"></td><td class="r"><input value="${m.lugares}" data-chg="mesaf" data-id="${m.id}" data-k="lugares" inputmode="numeric" style="width:60px;text-align:right" aria-label="Lugares da mesa ${m.num}"></td><td><input type="checkbox" data-chg="mesaf" data-id="${m.id}" data-k="ativa" ${m.ativa!==false?'checked':''} aria-label="Mesa ${m.num} ativa"></td><td>${c?chip('ocupada','warn'):`<button class="btn sm bad" data-act="mesadel" data-id="${m.id}">Excluir</button>`}</td></tr>`}).join('')||'<tr><td colspan="6" class="muted">Nenhuma mesa.</td></tr>'}</table></div>
+ <p class="muted">Excluir uma mesa não apaga vendas já feitas: o histórico guarda o nome da mesa no momento da venda. O número da mesa não pode ser alterado; para renumerar, exclua e crie de novo.</p></div>`}
+function drawMove(){const c=curCmd();if(!c){hideModal();return}const j=ui.mv==='juntar';
+ const opts=j?S.comandas.filter(x=>x.id!==c.id&&!x.pdv&&x.itens.length):(S.mesas||[]).filter(m=>m.ativa!==false&&!cmdDaMesa(m.num)&&m.num!==c.mesa).sort((a,b)=>a.num-b.num);
+ showModal(`<div class="mh"><h2>${j?'Juntar com outra comanda':'Transferir para outra mesa'}</h2><button class="btn sm" data-act="mvback">Voltar</button></div>
+ <p class="muted">${j?'Os itens desta comanda passam para a comanda escolhida, que continua aberta. Esta comanda é encerrada sem cobrança.':'A comanda e os itens já enviados à cozinha são mantidos; só muda a mesa.'}</p>
+ <div class="mesas">${opts.map(o=>j?`<button class="mesa occ" data-act="mvjoin" data-id="${o.id}"><b>${esc(o.local)}</b><span>${money(subtotal(o.itens))}</span></button>`:`<button class="mesa" data-act="mvdo" data-m="${o.num}"><div><b>${esc(rotuloMesa(o))}</b><small class="muted" style="display:block">${esc(o.area||'Salão')} · ${o.lugares} lugares</small></div><span class="muted">Livre</span></button>`).join('')||'<p class="muted">Nenhuma opção disponível.</p>'}</div>`,true)}
+Object.assign(CH,{
+ mesaf(v,d){if(!needM())return render();const m=(S.mesas||[]).find(x=>x.id===d.id);if(!m)return;
+  if(d.k==='ativa'){if(!v&&cmdDaMesa(m.num)){toast('Mesa com comanda aberta não pode ser desativada.');return render()}m.ativa=!!v}
+  else if(d.k==='lugares')m.lugares=Math.max(1,Math.min(50,Math.round(num(v))||1));else if(d.k==='area')m.area=String(v).trim()||'Salão';else m.nome=String(v).trim().slice(0,30);
+  logA('Mesa alterada',rotuloMesa(m)+' · '+d.k);save();render()}});
+Object.assign(A,{
+ mesa(d){const m=mesaPorNum(+d.m);if(!m||m.ativa===false)return toast('Mesa indisponível.');let c=cmdDaMesa(m.num);if(!c){c={id:uid(),mesa:m.num,local:rotuloMesa(m),itens:[],aberta:new Date().toISOString(),pessoas:1,gar:ui.user?ui.user.nome:''};S.comandas.push(c)}ui.cmd=c.id;ui.cat='Todos';ui.q='';drawCmd()},
+ balcao(){const n=S.comandas.filter(c=>!c.mesa&&!c.pdv).length+1;const c={id:uid(),mesa:0,local:'Balcão '+n,itens:[],aberta:new Date().toISOString(),pessoas:1,gar:ui.user?ui.user.nome:''};S.comandas.push(c);ui.cmd=c.id;ui.cat='Todos';ui.q='';drawCmd()},
+ area(d){ui.area=d.k;render()},
+ mesager(){if(!needM())return;ui.gm=true;render()},mesavoltar(){ui.gm=false;render()},
+ mesaadd(){if(!needM())return;const n=Math.round(num($('#mn_num').value)),lug=Math.max(1,Math.min(50,Math.round(num($('#mn_lug').value))||4));
+  if(!(n>=1&&n<=999))return toast('Número da mesa deve ficar entre 1 e 999.');if(mesaPorNum(n))return toast('Já existe a mesa '+n+'.');if((S.mesas||[]).length>=200)return toast('Limite de 200 mesas.');
+  const m=mkMesa(n,{nome:$('#mn_nome').value.trim().slice(0,30),area:$('#mn_area').value.trim()||'Salão',lugares:lug});S.mesas.push(m);logA('Mesa criada',rotuloMesa(m));save();render();toast('Mesa '+n+' adicionada.')},
+ mesalote(){if(!needM())return;const q=Math.round(num($('#ml_qtd').value)),lug=Math.max(1,Math.min(50,Math.round(num($('#ml_lug').value))||4)),area=$('#ml_area').value.trim()||'Salão';
+  if(!(q>=1&&q<=50))return toast('Informe de 1 a 50 mesas.');let n=S.mesas.reduce((a,m)=>Math.max(a,m.num),0);if(n+q>999||S.mesas.length+q>200)return toast('Limite de mesas excedido.');
+  for(let i=0;i<q;i++)S.mesas.push(mkMesa(++n,{area,lugares:lug}));logA('Mesas criadas',q+' mesas na área '+area);save();render();toast(q+' mesas criadas.')},
+ mesadel(d){if(!needM())return;const m=S.mesas.find(x=>x.id===d.id);if(!m)return;const c=cmdDaMesa(m.num);if(c)return toast('A '+rotuloMesa(m)+' tem comanda aberta ('+money(subtotal(c.itens))+'). Feche ou transfira antes de excluir.');
+  askConfirm('Excluir a '+rotuloMesa(m)+'? Vendas já feitas não são afetadas.',()=>{S.mesas=S.mesas.filter(x=>x.id!==m.id);logA('Mesa excluída',rotuloMesa(m));save();render()})},
+ mvopen(d){ui.mv=d.mode;drawMove()},mvback(){drawCmd()},
+ mvdo(d){const c=curCmd(),m=mesaPorNum(+d.m);if(!c||!m)return;if(cmdDaMesa(m.num))return toast('A mesa foi ocupada. Escolha outra.');const de=c.local;c.mesa=m.num;c.local=rotuloMesa(m);logA('Comanda transferida',de+' → '+c.local);save();toast('Comanda transferida para '+c.local+'.');drawCmd()},
+ mvjoin(d){const c=curCmd(),t=S.comandas.find(x=>x.id===d.id);if(!c||!t)return;
+  askConfirm('Juntar '+c.local+' em '+t.local+'? Os itens passam para '+t.local+'.',()=>{t.itens.push(...c.itens);t.pessoas=(t.pessoas||1)+(c.pessoas||1);t.conta=false;logA('Comandas juntadas',c.local+' → '+t.local+' · '+money(subtotal(c.itens)));S.comandas=S.comandas.filter(x=>x.id!==c.id);ui.cmd=t.id;save();toast('Comandas juntadas.');drawCmd()})},
+ pconta(){const c=curCmd();if(!c)return;c.conta=!c.conta;save();drawCmd()},
+ servir(d){const c=curCmd(),it=c&&c.itens[+d.k];if(!it)return;it.servido=new Date().toISOString();save();drawCmd()}});
 if(CLOUD()){S=blankState('');showLogin()}else{S=load();save();retryPend();if(ui.user)render();else showLogin()}
 
 </script>

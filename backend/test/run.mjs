@@ -97,6 +97,9 @@ r = await call('POST', '/users', { token: tokA, body: { nome: 'Gar1', perfil: 'g
 for (let i = 0; i < 5; i++) await call('POST', '/authorize', { token: g1, body: { acao: 'desconto', pin: '0000' } });
 r = await call('POST', '/authorize', { token: tokA, body: { acao: 'desconto', pin: '1234' } }); assert.equal(r.status, 200); ok('garçom que erra PINs não bloqueia a autorização do proprietário');
 r = await call('POST', '/authorize', { token: g1, body: { acao: 'desconto', pin: '1234' } }); assert.equal(r.status, 429); ok('o bloqueio vale só para quem errou');
+r = await call('POST', '/sync', { token: g1, body: { changes: [{ c: 'mesas', id: 'm99', d: { id: 'm99', num: 99, ativa: true } }] } }); assert.equal(r.data.rej, 1);
+r = await call('POST', '/sync', { token: tokA, body: { changes: [{ c: 'mesas', id: 'm99', d: { id: 'm99', num: 99, ativa: true } }] } }); assert.equal(r.data.rej, 0);
+assert.ok((await pull(g1)).some(x => x.c === 'mesas' && x.id === 'm99')); ok('só proprietário e gerente gravam mesas; garçom as recebe');
 { const id = (await call('GET', '/public/users', { query: { slug: 'cantina-dois' } })).data.users[0].id;
   for (let i = 0; i < 5; i++) await call('POST', '/login', { body: { slug: 'cantina-dois', userId: id, pin: '0000' } }); b.advance(61000);
   for (let i = 0; i < 5; i++) await call('POST', '/login', { body: { slug: 'cantina-dois', userId: id, pin: '0000' } }); b.advance(61000);

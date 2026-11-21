@@ -8,12 +8,12 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 
 class HttpError extends Error { constructor(s, m) { super(m); this.status = s; } }
 const bad = m => new HttpError(400, m);
-const COLLS = ['produtos', 'insumos', 'comandas', 'vendas', 'delivery', 'entregadores', 'notas', 'contas', 'producao', 'movEst', 'caixaHist', 'audit', 'gorjEquipe', 'gorjLanc', 'gorjFech', 'cfg', 'caixa'];
+const COLLS = ['produtos', 'insumos', 'comandas', 'vendas', 'delivery', 'entregadores', 'notas', 'contas', 'producao', 'movEst', 'caixaHist', 'audit', 'gorjEquipe', 'gorjLanc', 'gorjFech', 'mesas', 'cfg', 'caixa'];
 const CAN = { dono: '*', gerente: ['desconto', 'cancelar', 'sangria', 'cancnota', 'fechacaixa', 'contas', 'ajusteest'], caixa: ['fechacaixa'], garcom: [], cozinha: ['ajusteest'] };
 const PERFIS = Object.keys(CAN);
 // Quem pode GRAVAR cada coleção (as demais são operacionais e ficam abertas a qualquer perfil autenticado).
 // 'audit' é somente de inclusão: ninguém altera nem apaga registro existente.
-const WRITE = { cfg: ['dono'], produtos: ['dono', 'gerente'], insumos: ['dono', 'gerente', 'cozinha'], contas: ['dono', 'gerente'], gorjEquipe: ['dono', 'gerente'], gorjLanc: ['dono', 'gerente'], gorjFech: ['dono', 'gerente'] };
+const WRITE = { cfg: ['dono'], produtos: ['dono', 'gerente'], insumos: ['dono', 'gerente', 'cozinha'], contas: ['dono', 'gerente'], gorjEquipe: ['dono', 'gerente'], gorjLanc: ['dono', 'gerente'], gorjFech: ['dono', 'gerente'], mesas: ['dono', 'gerente'] };
 const NFCE_PERFIS = ['dono', 'gerente', 'caixa'];
 const lockMs = strikes => Math.min(60000 * 2 ** Math.min(strikes || 0, 6), 3600000); // 1 min, 2, 4 ... até 1 h
 const can = (perfil, a) => a === 'usuarios' ? perfil === 'dono' : CAN[perfil] === '*' || (CAN[perfil] || []).includes(a);
