@@ -202,10 +202,11 @@ function custoProd(p){if(p.ficha&&p.ficha.length)return p.ficha.reduce((a,l)=>{c
 function baixa(itens,sign){ // sign=1 consome, -1 devolve
  itens.forEach(it=>{const p=prod(it.pid);if(!p||!p.ficha)return;p.ficha.forEach(l=>{const x=ins(l.id);if(x)x.estoque=r3(x.estoque-sign*l.qtd*it.qtd)})})}
 const r3=n=>Math.round(n*1000)/1000;
-function subtotal(itens){return fromC(itens.reduce((a,i)=>{const p=prod(i.pid);return a+(p?linhaC(p.preco,i.qtd):0)},0))}
+const valorItemC=(i,preco)=>i.vl!=null?i.vl:linhaC(preco,i.qtd);
+function subtotal(itens){return fromC(itens.reduce((a,i)=>{const p=prod(i.pid);return a+(p?valorItemC(i,p.preco):0)},0))}
 function mkVenda(o){
- const itens=o.itens.map(i=>{const p=prod(i.pid);return{pid:p.id,nome:p.nome,qtd:i.qtd,preco:p.preco,custo:r2(custoProd(p))}});
- const sub=fromC(itens.reduce((a,i)=>a+linhaC(i.preco,i.qtd),0));
+ const itens=o.itens.map(i=>{const p=prod(i.pid);const it={pid:p.id,nome:p.nome,qtd:i.qtd,preco:p.preco,custo:r2(custoProd(p))};if(i.vl!=null)it.vl=i.vl;return it});
+ const sub=fromC(itens.reduce((a,i)=>a+valorItemC(i,i.preco),0));
  const total=fromC(Math.max(0,toC(sub)+toC(o.servico)-toC(o.desc)+toC(o.taxa)));
  const v={id:uid(),op:ui.user?ui.user.nome:'',n:S.seq++,data:o.data||new Date().toISOString(),tipo:o.tipo,local:o.local||'',canal:o.canal||'',cliente:o.cliente||'',itens,sub,serv:o.servico||0,desc:o.desc||0,taxa:o.taxa||0,total,pagamentos:o.pagamentos,troco:o.troco||0,notaId:null};
  S.vendas.push(v);return v}
@@ -222,7 +223,7 @@ function mkNota(v,doc,sim){
 function payloadNota(nota){const v=S.vendas.find(x=>x.id===nota.vendaId),c=S.cfg;
  return{ambiente:c.ambiente==='producao'?1:2,modelo:65,serie:nota.serie,numero:nota.numero,emitente:{cnpj:cnpjLimpo(c.cnpj),ie:c.ie,uf:c.uf,regime:c.regime,csc_id:c.cscId},
  destinatario:nota.doc?{documento:nota.doc}:null,
- itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,...fiscItem(p),unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.preco,valor_total:fromC(linhaC(i.preco,i.qtd))}}),
+ itens:v.itens.map((i,k)=>{const p=prod(i.pid)||{};return{n:k+1,descricao:i.nome,...fiscItem(p),unidade:p.tipo==='kg'?'KG':'UN',quantidade:i.qtd,valor_unitario:i.vl!=null&&i.qtd?Math.round(i.vl/i.qtd*1e8)/1e10:i.preco,valor_total:fromC(valorItemC(i,i.preco))}}),
  pagamentos:v.pagamentos.map(g=>({forma:g.forma,valor:g.valor})),desconto:v.desc,acrescimos:fromC(toC(v.serv)+toC(v.taxa)),total:v.total,ref:v.id}}
 async function transmitir(nota){
  const c=S.cfg;
@@ -290,7 +291,7 @@ function vendasDias(n){const lim=new Date();lim.setHours(0,0,0,0);lim.setDate(li
 const vendasHoje=()=>vendasDias(1);
 const soma=(a,f)=>fromC(a.reduce((x,y)=>x+toC(f(y)),0)); /* soma monetária exata: cada parcela vira centavo inteiro */
 const cmv=v=>soma(v.itens,i=>i.qtd*i.custo);
-function topProdutos(vs){const m={};vs.forEach(v=>v.itens.forEach(i=>{const k=i.nome;m[k]=m[k]||{nome:k,qtd:0,rec:0,custo:0};m[k].qtd+=i.qtd;m[k].rec+=fromC(linhaC(i.preco,i.qtd));m[k].custo+=i.qtd*i.custo}));return Object.values(m).sort((a,b)=>b.rec-a.rec)}
+function topProdutos(vs){const m={};vs.forEach(v=>v.itens.forEach(i=>{const k=i.nome;m[k]=m[k]||{nome:k,qtd:0,rec:0,custo:0};m[k].qtd+=i.qtd;m[k].rec+=fromC(valorItemC(i,i.preco));m[k].custo+=i.qtd*i.custo}));return Object.values(m).sort((a,b)=>b.rec-a.rec)}
 function caixaEsperado(){const c=S.caixa;if(!c.aberto)return 0;const ini=new Date(c.em);let d=toC(c.abertura);S.vendas.filter(v=>new Date(v.data)>=ini).forEach(v=>v.pagamentos.filter(p=>p.forma==='Dinheiro').forEach(p=>d+=toC(p.valor)));c.movs.forEach(m=>d+=m.tipo==='suprimento'?toC(m.valor):-toC(m.valor));return fromC(d)}
 const baixos=()=>S.insumos.filter(i=>i.estoque<=i.min);
 const notasPend=()=>S.notas.filter(n=>n.status==='pendente'||n.status==='rejeitada');
@@ -445,17 +446,17 @@ function drawCmd(){const c=curCmd();if(!c){hideModal();return}
  <div class="qty">${p.tipo==='kg'?`<input value="${qf(it.qtd)}" data-chg="kg" data-k="${k}" inputmode="decimal" aria-label="Peso em kg"> kg`:`<button class="btn sm" data-act="qty" data-k="${k}" data-d="-1">-</button><b>${it.qtd}</b><button class="btn sm" data-act="qty" data-k="${k}" data-d="1">+</button>`}<button class="btn sm bad" data-act="rmitem" data-k="${k}" aria-label="Remover">x</button></div>
  <input value="${esc(it.obs||'')}" data-chg="obs" data-k="${k}" placeholder="Observação (ex.: sem cebola)" style="grid-column:1/-1"></div>`}).join('')||'<p class="muted">Toque em um produto para lançar.</p>'}
  <div class="row" style="margin:10px 0"><label style="width:110px">Pessoas<input value="${c.pessoas||1}" data-chg="pessoas" inputmode="numeric"></label><div class="right" style="text-align:right"><span class="muted">Subtotal</span><br><b style="font-size:1.3rem">${money(sub)}</b></div></div>
- <div class="row"><button class="btn" data-act="sendk" ${naoEnv?'':'disabled'}>Enviar à cozinha (${naoEnv})</button><button class="btn" data-act="prec">Copiar pré-conta</button>${c.pdv?'':`<button class="btn" data-act="mvopen" data-mode="transf">Transferir</button><button class="btn" data-act="mvopen" data-mode="juntar">Juntar</button><button class="btn" data-act="pconta">${c.conta?'Reabrir consumo':'Pedir conta'}</button>`}<button class="btn pri" data-act="fechar" ${c.itens.length?'':'disabled'}>Fechar conta</button><button class="btn bad" data-act="cancmd">Cancelar</button></div></div></div>`,true)}
+ <div class="row"><button class="btn" data-act="sendk" ${naoEnv?'':'disabled'}>Enviar à cozinha (${naoEnv})</button><button class="btn" data-act="prec">Copiar pré-conta</button>${c.pdv?'':`<button class="btn" data-act="mvopen" data-mode="transf">Transferir</button><button class="btn" data-act="mvopen" data-mode="juntar">Juntar</button><button class="btn" data-act="pconta">${c.conta?'Reabrir consumo':'Pedir conta'}</button>`}${c.pdv?'':`<button class="btn" data-act="spopen" ${c.itens.length?'':'disabled'}>Dividir conta${spPagos(c)?' (em andamento)':''}</button>`}<button class="btn pri" data-act="fechar" ${c.itens.length&&!spPagos(c)?'':'disabled'}>Fechar conta</button><button class="btn bad" data-act="cancmd">Cancelar</button></div></div></div>`,true)}
 
-function addProd(id){const c=curCmd(),p=prod(id);if(p.tipo==='kg'){c.itens.push({pid:id,qtd:0.5,obs:'',env:null,pronto:false});}else{const e=c.itens.find(i=>i.pid===id&&!i.env&&!i.obs);if(e)e.qtd++;else c.itens.push({pid:id,qtd:1,obs:'',env:null,pronto:false})}save();drawCmd()}
-function prePrint(src,k){return[S.cfg.nome,'PRÉ-CONTA '+(src.local||''),...src.itens.map(i=>`${qf(i.qtd)} x ${prod(i.pid).nome}  ${money(prod(i.pid).preco*i.qtd)}`),'Subtotal: '+money(subtotal(src.itens)),'Taxa de serviço opcional: '+S.cfg.servicoPct+'%'].join('\n')}
+function addProd(id){const c=curCmd(),p=prod(id);if(spLock(c))return;if(p.tipo==='kg'){c.itens.push({pid:id,qtd:0.5,obs:'',env:null,pronto:false});}else{const e=c.itens.find(i=>i.pid===id&&!i.env&&!i.obs);if(e)e.qtd++;else c.itens.push({pid:id,qtd:1,obs:'',env:null,pronto:false})}save();drawCmd()}
+function prePrint(src,k){return[S.cfg.nome,'PRÉ-CONTA '+(src.local||''),...src.itens.map(i=>`${qf(i.qtd)} x ${prod(i.pid).nome}  ${money(fromC(valorItemC(i,prod(i.pid).preco)))}`),'Subtotal: '+money(subtotal(src.itens)),'Taxa de serviço opcional: '+S.cfg.servicoPct+'%'].join('\n')}
 
 /* ===== Pagamento ===== */
-const refSrc=r=>r.kind==='cmd'?S.comandas.find(c=>c.id===r.id):S.delivery.find(d=>d.id===r.id);
+const refSrc=r=>r.kind==='cmd'?S.comandas.find(c=>c.id===r.id):r.kind==='sp'?spSrc(r):S.delivery.find(d=>d.id===r.id);
 function payCalc(){const p=ui.pay,src=refSrc(p.ref),subC=toC(subtotal(src.itens)),servC=p.servico?pctC(subC,S.cfg.servicoPct):0,brutoC=subC+servC,
  descC=Math.max(0,Math.min(brutoC,p.dtipo==='%'?pctC(subC,p.dval):toC(p.dval))),taxaC=p.ref.kind==='del'?toC(src.taxa):0,totalC=brutoC-descC+taxaC,pagoC=p.pags.reduce((a,g)=>a+toC(g.valor),0);
  return{src,sub:fromC(subC),serv:fromC(servC),desc:fromC(descC),taxa:fromC(taxaC),total:fromC(totalC),pago:fromC(pagoC),falta:fromC(totalC-pagoC)}}
-function openPay(ref){const src=refSrc(ref);const sal=ref.kind==='cmd'&&src.mesa;ui.pay={ref,servico:!!sal&&S.cfg.servicoPct>0,dtipo:'R$',dval:0,pags:[],emitir:false,doc:'',pessoas:src.pessoas||1};
+function openPay(ref){const src=refSrc(ref);if(!src)return toast('Conta não encontrada.');const sal=(ref.kind==='cmd'||ref.kind==='sp')&&src.mesa;ui.pay={ref,servico:!!sal&&S.cfg.servicoPct>0,dtipo:'R$',dval:0,pags:[],emitir:false,doc:'',pessoas:src.pessoas||1};
  if(ref.kind==='del'){const k=payCalc();ui.pay.pags=[{forma:src.forma,valor:k.total,auto:true}]}drawPay()}
 function autoFix(){const p=ui.pay;if(p.pags.length===1&&p.pags[0].auto)p.pags[0].valor=payCalc().total}
 function drawPay(){autoFix();const p=ui.pay,k=payCalc();
@@ -471,8 +472,9 @@ function drawPay(){autoFix();const p=ui.pay,k=payCalc();
  ${k.falta>0.005?`<div class="row">${FORMAS.map(f=>`<button class="btn sm" data-act="payfull" data-f="${f}">Restante em ${f}</button>`).join('')}</div>
  <div class="row" style="margin-top:8px"><select id="pf" style="width:150px">${FORMAS.map(f=>`<option>${f}</option>`).join('')}</select><input id="pv" placeholder="Valor" inputmode="decimal" style="width:120px"><button class="btn sm" data-act="payadd">Lançar valor</button></div>`:''}</div>
  <div class="card" style="margin-top:10px"><label class="ck"><input type="checkbox" data-chg="pemit" ${p.emitir?'checked':''}> Emitir NFC-e nesta venda</label>${p.emitir?`<label style="margin-top:8px">CPF ou CNPJ na nota (opcional)<input value="${esc(p.doc)}" data-chg="pdoc" maxlength="18" autocapitalize="characters" style="text-transform:uppercase" placeholder="CPF ou CNPJ (com ou sem pontuação)"></label>`:''}</div>
- <div class="row" style="margin-top:12px"><button class="btn pri" data-act="confpay" ${k.falta>0.005?'disabled':''}>Confirmar recebimento</button><button class="btn" data-act="prec2">Copiar pré-conta</button></div>`)}
+ <div class="row" style="margin-top:12px"><button class="btn pri" data-act="confpay" ${k.falta>0.005?'disabled':''}>Confirmar recebimento</button><button class="btn" data-act="prec2">Copiar pré-conta</button>${p.ref.kind==='cmd'&&!k.src.pdv?`<button class="btn" data-act="spopen">Dividir conta</button>`:''}${p.ref.kind==='sp'?`<button class="btn" data-act="spopen">Voltar à divisão</button>`:''}</div>`)}
 async function confirmPay(){autoFix();const p=ui.pay,k=payCalc();
+ if(p.ref.kind==='sp'){const c0=S.comandas.find(x=>x.id===p.ref.id),g0=c0&&c0.split&&c0.split.grupos.find(x=>x.id===p.ref.g);if(!g0||g0.pago)return toast('Esta parte da conta já foi recebida ou não existe mais.')}
  if(!S.caixa.aberto)return toast('Abra o caixa em Financeiro antes de receber.');
  if(k.desc>0&&!can('desconto')&&!p.authDesc)return askAuth('desconto',()=>{p.authDesc=true;confirmPay()});
  if(k.falta>0.005)return toast('Ainda falta '+money(k.falta));
@@ -480,13 +482,13 @@ async function confirmPay(){autoFix();const p=ui.pay,k=payCalc();
  if(p.emitir){const fp=fiscPend(refSrc(p.ref).itens);if(fp.length)return toast('NFC-e bloqueada: padrão fiscal sem validação do contador ou incompleto ('+fp.join('; ')+').')}
  let trocoC=Math.max(0,toC(-k.falta)),troco=fromC(trocoC),pags=p.pags.map(g=>({...g,valor:r2(g.valor)}));
  if(trocoC>0){const dinC=pags.filter(g=>g.forma==='Dinheiro').reduce((a,g)=>a+toC(g.valor),0);if(dinC<trocoC)return toast('O troco só pode sair de pagamento em dinheiro.');let restC=trocoC;pags.forEach(g=>{if(g.forma==='Dinheiro'&&restC>0){const t=Math.min(toC(g.valor),restC);g.valor=fromC(toC(g.valor)-t);restC-=t}});pags=pags.filter(g=>toC(g.valor)>0)}else troco=0;
- const src=k.src,del=p.ref.kind==='del';
+ const src=k.src,del=p.ref.kind==='del',spl=p.ref.kind==='sp';
  if(CLOUD()&&navigator.onLine){try{S.seq=(await api('POST','/counter',{name:'venda'})).n}catch(e){}}
- const v=mkVenda({tipo:del?'delivery':src.mesa?'salao':'balcao',itens:src.itens.map(i=>({pid:i.pid,qtd:i.qtd})),local:src.local||'',canal:src.canal||'',cliente:src.cliente||'',servico:k.serv,desc:k.desc,taxa:k.taxa,pagamentos:pags,troco});
- if(!del){baixa(src.itens,1);S.comandas=S.comandas.filter(c=>c.id!==src.id)}else{if(!src.baixado){baixa(src.itens,1);src.baixado=true}src.status='entregue';src.vendaId=v.id}
+ const v=mkVenda({tipo:del?'delivery':src.mesa?'salao':'balcao',itens:src.itens.map(i=>({pid:i.pid,qtd:i.qtd,vl:i.vl})),local:src.local||'',canal:src.canal||'',cliente:src.cliente||'',servico:k.serv,desc:k.desc,taxa:k.taxa,pagamentos:pags,troco});
+ if(spl){spPago(src,v)}else if(!del){baixa(src.itens,1);S.comandas=S.comandas.filter(c=>c.id!==src.id)}else{if(!src.baixado){baixa(src.itens,1);src.baixado=true}src.status='entregue';src.vendaId=v.id}
  let nota=null;if(p.emitir){nota=mkNota(v,p.doc,false);await transmitir(nota)}
  logA('Venda #'+v.n,money(v.total)+(k.desc?' · desconto '+money(k.desc):'')+(nota?' · NFC-e '+nota.numero:''));if(src.pdv)ui.pdv=null;save();ui.pay=null;ui.cmd=null;showReceipt(v,nota);render()}
-function showReceipt(v,nota){const t=[S.cfg.nome,'Venda nº '+v.n+' · '+dmy(v.data)+' '+hhmm(v.data),...v.itens.map(i=>`${qf(i.qtd)} x ${i.nome}  ${money(i.qtd*i.preco)}`),v.serv?'Serviço: '+money(v.serv):'',v.desc?'Desconto: -'+money(v.desc):'',v.taxa?'Entrega: '+money(v.taxa):'','TOTAL: '+money(v.total),...v.pagamentos.map(g=>g.forma+': '+money(g.valor)),v.troco?'Troco: '+money(v.troco):'',nota?`NFC-e ${nota.numero}/${nota.serie} · ${nota.status}${nota.chave?'\nChave: '+nota.chave:''}`:'Sem NFC-e (comprovante não fiscal)'].filter(Boolean).join('\n');
+function showReceipt(v,nota){const t=[S.cfg.nome,'Venda nº '+v.n+' · '+dmy(v.data)+' '+hhmm(v.data),...v.itens.map(i=>`${qf(i.qtd)} x ${i.nome}  ${money(fromC(valorItemC(i,i.preco)))}`),v.serv?'Serviço: '+money(v.serv):'',v.desc?'Desconto: -'+money(v.desc):'',v.taxa?'Entrega: '+money(v.taxa):'','TOTAL: '+money(v.total),...v.pagamentos.map(g=>g.forma+': '+money(g.valor)),v.troco?'Troco: '+money(v.troco):'',nota?`NFC-e ${nota.numero}/${nota.serie} · ${nota.status}${nota.chave?'\nChave: '+nota.chave:''}`:'Sem NFC-e (comprovante não fiscal)'].filter(Boolean).join('\n');
  showModal(mh('Venda registrada')+(nota&&nota.status!=='autorizada'?`<div class="banner">NFC-e ${esc(nota.status)}: ${esc(nota.msg)}</div>`:'')+`<pre>${esc(t)}</pre><div class="row" style="margin-top:10px"><button class="btn pri" data-act="copyrec" data-t="${esc(t)}">Copiar comprovante</button><button class="btn" data-act="close">Concluir</button></div>`)}
 
 /* ===== Delivery: novo pedido ===== */
@@ -532,13 +534,13 @@ const A={
  opencmd(d){ui.cmd=d.id;ui.cat='Todos';ui.q='';drawCmd()},
  cat(d){ui.cat=d.k;drawCmd()},
  addp(d){addProd(d.id)},
- qty(d){const c=curCmd(),it=c.itens[+d.k];guard(it.env&&+d.d<0?'cancelar':null,()=>{if(it.env&&+d.d<0)logA('Item enviado reduzido',prod(it.pid).nome+' · '+c.local);it.qtd+=+d.d;if(it.qtd<=0)c.itens.splice(c.itens.indexOf(it),1);save();drawCmd()})},
- rmitem(d){const c=curCmd(),it=c.itens[+d.k];guard(it.env?'cancelar':null,()=>{if(it.env)logA('Item enviado removido',prod(it.pid).nome+' · '+c.local);c.itens.splice(c.itens.indexOf(it),1);save();drawCmd()})},
+ qty(d){const c=curCmd(),it=c.itens[+d.k];if(spLock(c))return;guard(it.env&&+d.d<0?'cancelar':null,()=>{if(it.env&&+d.d<0)logA('Item enviado reduzido',prod(it.pid).nome+' · '+c.local);it.qtd+=+d.d;if(it.qtd<=0)c.itens.splice(c.itens.indexOf(it),1);save();drawCmd()})},
+ rmitem(d){const c=curCmd(),it=c.itens[+d.k];if(spLock(c))return;guard(it.env?'cancelar':null,()=>{if(it.env)logA('Item enviado removido',prod(it.pid).nome+' · '+c.local);c.itens.splice(c.itens.indexOf(it),1);save();drawCmd()})},
  sendk(){const c=curCmd();const t=new Date().toISOString();c.itens.forEach(i=>{if(!i.env){i.env=t;i.pronto=false}});save();toast('Itens enviados à cozinha.');drawCmd()},
  prec(){copyText(prePrint(curCmd()))},
  prec2(){copyText(prePrint(refSrc(ui.pay.ref)))},
  fechar(){const c=curCmd();if(!c.itens.length)return;openPay({kind:'cmd',id:c.id})},
- cancmd(){const c=curCmd();guard(c.itens.some(i=>i.env)?'cancelar':null,()=>askConfirm('Cancelar esta comanda e descartar os itens lançados?',()=>{logA('Comanda cancelada',c.local+' · '+money(subtotal(c.itens)));S.comandas=S.comandas.filter(x=>x.id!==c.id);ui.cmd=null;save();hideModal()}))},
+ cancmd(){const c=curCmd();if(spPagos(c))return toast('Há partes já recebidas: a comanda não pode ser cancelada.');guard(c.itens.some(i=>i.env)?'cancelar':null,()=>askConfirm('Cancelar esta comanda e descartar os itens lançados?',()=>{logA('Comanda cancelada',c.local+' · '+money(subtotal(c.itens)));S.comandas=S.comandas.filter(x=>x.id!==c.id);ui.cmd=null;save();hideModal()}))},
  rmpag(d){ui.pay.pags.splice(+d.k,1);drawPay()},
  payfull(d){const k=payCalc();ui.pay.pags.push({forma:d.f,valor:k.falta,auto:!ui.pay.pags.length});drawPay()},
  payadd(){const v=num($('#pv').value);if(v<=0)return toast('Informe um valor.');ui.pay.pags.push({forma:$('#pf').value,valor:r2(v)});drawPay()},
@@ -610,7 +612,7 @@ const A={
 const CH={
  cfg(v,d){if(d.k==='cnpj'){v=String(v).trim();if(v&&!validaCNPJ(v)){toast('CNPJ inválido. Confira os 12 primeiros caracteres e os 2 dígitos verificadores.');render();return}v=v?fmtCNPJ(v):'';S.cfg.cnpj=v;save();render();return}if(CLOUD()&&FISCAL_KEYS.includes(d.k)){const body={};body[d.k]=v;api('PUT','/fiscal',body).then(()=>{if(d.k!=='token')S.cfg[d.k]=v;toast('Configuração fiscal salva no servidor.')}).catch(e=>toast(e.message));return}S.cfg[d.k]=v;save();if(d.k==='nome')renderNav()},
  cfgn(v,d){S.cfg[d.k]=num(v);if(d.k==='mesas')S.cfg.mesas=Math.max(1,Math.min(60,Math.round(num(v))));save()},
- kg(v,d){const c=curCmd();c.itens[+d.k].qtd=Math.max(0.01,num(v));save();drawCmd()},
+ kg(v,d){const c=curCmd();if(spLock(c))return;c.itens[+d.k].qtd=Math.max(0.01,num(v));save();drawCmd()},
  obs(v,d){curCmd().itens[+d.k].obs=v;save()},
  pessoas(v){curCmd().pessoas=Math.max(1,Math.round(num(v))||1);save()},
  pserv(v,d,el){ui.pay.servico=el.checked;drawPay()},
@@ -923,7 +925,7 @@ function fiscPerfil(id){return((S.cfg.fisc||{}).perfis||[]).find(x=>x.id===id)}
 function fiscItem(p){const pf=p.pf&&fiscPerfil(p.pf);return pf?{ncm:p.ncm,cest:pf.cest,cfop:pf.cfop,csosn:pf.csosn,cst_pis:pf.cstPis,cst_cofins:pf.cstCofins,origem:pf.origem}:{ncm:p.ncm,cfop:p.cfop,csosn:p.csosn}}
 function fiscPend(itens){if(S.cfg.ambiente!=='producao')return[];const out=new Set();(itens||[]).forEach(i=>{const p=prod(i.pid);const pf=p&&p.pf&&fiscPerfil(p.pf);if(!pf)return;if(pf.status!=='validado'||!pf.cfop||!pf.csosn||!pf.cstPis||!pf.cstCofins)out.add(pf.nome)});return[...out]}
 function fiscApur(mes){const out={},tot={v:0};
- S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).forEach(v=>v.itens.forEach(i=>{const p=prod(i.pid)||{};const pf=p.pf&&fiscPerfil(p.pf);const k=pf?pf.id:'_sem';const val=linhaC(i.preco,i.qtd);out[k]=(out[k]||0)+val;tot.v+=val}));
+ S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes).forEach(v=>v.itens.forEach(i=>{const p=prod(i.pid)||{};const pf=p.pf&&fiscPerfil(p.pf);const k=pf?pf.id:'_sem';const val=valorItemC(i,i.preco);out[k]=(out[k]||0)+val;tot.v+=val}));
  const serv=soma(S.vendas.filter(v=>dayKey(v.data).slice(0,7)===mes),v=>v.serv||0);Object.keys(out).forEach(k=>out[k]=fromC(out[k]));return{out,total:fromC(tot.v),serv}}
 const SIMNAO={sim:'Sim',nao:'Não',revisar:'A definir com o contador'};
 function vPadroes(){
@@ -1005,10 +1007,10 @@ function vSalao(){
  if(ui.gm&&can('mesas'))return vMesasGer();
  const ms=(S.mesas||[]).filter(m=>m.ativa!==false).sort((a,b)=>a.num-b.num),areas=[...new Set(ms.map(m=>m.area||'Salão'))];
  const fa=areas.includes(ui.area)?ui.area:'Todas',vis=ms.filter(m=>fa==='Todas'||(m.area||'Salão')===fa);
- const ocup=ms.filter(m=>cmdDaMesa(m.num)),emConsumo=soma(ocup,m=>subtotal(cmdDaMesa(m.num).itens)),contas=ocup.filter(m=>cmdDaMesa(m.num).conta).length;
+ const ocup=ms.filter(m=>cmdDaMesa(m.num)),emConsumo=soma(ocup,m=>cmdRestante(cmdDaMesa(m.num))),contas=ocup.filter(m=>cmdDaMesa(m.num).conta).length;
  const card=m=>{const c=cmdDaMesa(m.num),pr=c?prontosNaoServidos(c):0;
   return`<button class="mesa ${c?'occ':''} ${c&&c.conta?'conta':''}" data-act="mesa" data-m="${m.num}"><div><b>${esc(rotuloMesa(m))}</b><small class="muted" style="display:block">${esc(m.area||'Salão')} · ${m.lugares} lugares</small></div>
-  <div>${c?`<span>${money(subtotal(c.itens))} · ${mins(c.aberta)} min</span><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${c.conta?chip('conta pedida','warn'):''}${pr?chip(pr+' pronto'+(pr>1?'s':''),'ok'):''}${c.gar?`<small class="muted">${esc(c.gar)}</small>`:''}</div>`:'<span class="muted">Livre</span>'}</div></button>`};
+  <div>${c?`<span>${money(cmdRestante(c))} · ${mins(c.aberta)} min${spPagos(c)?' · parcial':''}</span><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${c.conta?chip('conta pedida','warn'):''}${pr?chip(pr+' pronto'+(pr>1?'s':''),'ok'):''}${c.gar?`<small class="muted">${esc(c.gar)}</small>`:''}</div>`:'<span class="muted">Livre</span>'}</div></button>`};
  const orf=S.comandas.filter(c=>!c.pdv&&(!c.mesa||!mesaPorNum(c.mesa)));
  return head('Salão e comandas','Abra uma mesa para lançar consumo; feche a conta com ou sem NFC-e.',`${can('mesas')?'<button class="btn" data-act="mesager">Gerenciar mesas</button> ':''}<button class="btn acc" data-act="balcao">Nova venda no balcão</button>`)+
  `<div class="grid g4">${kpi('Mesas livres',ms.length-ocup.length,'de '+ms.length+' ativas')}${kpi('Ocupadas',ocup.length)}${kpi('Em consumo',money(emConsumo))}${kpi('Contas pedidas',contas)}</div>`+
@@ -1051,10 +1053,54 @@ Object.assign(A,{
   askConfirm('Excluir a '+rotuloMesa(m)+'? Vendas já feitas não são afetadas.',()=>{S.mesas=S.mesas.filter(x=>x.id!==m.id);logA('Mesa excluída',rotuloMesa(m));save();render()})},
  mvopen(d){ui.mv=d.mode;drawMove()},mvback(){drawCmd()},
  mvdo(d){const c=curCmd(),m=mesaPorNum(+d.m);if(!c||!m)return;if(cmdDaMesa(m.num))return toast('A mesa foi ocupada. Escolha outra.');const de=c.local;c.mesa=m.num;c.local=rotuloMesa(m);logA('Comanda transferida',de+' → '+c.local);save();toast('Comanda transferida para '+c.local+'.');drawCmd()},
- mvjoin(d){const c=curCmd(),t=S.comandas.find(x=>x.id===d.id);if(!c||!t)return;
-  askConfirm('Juntar '+c.local+' em '+t.local+'? Os itens passam para '+t.local+'.',()=>{t.itens.push(...c.itens);t.pessoas=(t.pessoas||1)+(c.pessoas||1);t.conta=false;logA('Comandas juntadas',c.local+' → '+t.local+' · '+money(subtotal(c.itens)));S.comandas=S.comandas.filter(x=>x.id!==c.id);ui.cmd=t.id;save();toast('Comandas juntadas.');drawCmd()})},
+ mvjoin(d){const c=curCmd(),t=S.comandas.find(x=>x.id===d.id);if(!c||!t)return;if(spPagos(c)||spPagos(t))return toast('Há partes já recebidas em uma das comandas: não é possível juntar.');
+  askConfirm('Juntar '+c.local+' em '+t.local+'? Os itens passam para '+t.local+'.',()=>{t.split=null;t.itens.push(...c.itens);t.pessoas=(t.pessoas||1)+(c.pessoas||1);t.conta=false;logA('Comandas juntadas',c.local+' → '+t.local+' · '+money(subtotal(c.itens)));S.comandas=S.comandas.filter(x=>x.id!==c.id);ui.cmd=t.id;save();toast('Comandas juntadas.');drawCmd()})},
  pconta(){const c=curCmd();if(!c)return;c.conta=!c.conta;save();drawCmd()},
  servir(d){const c=curCmd(),it=c&&c.itens[+d.k];if(!it)return;it.servido=new Date().toISOString();save();drawCmd()}});
+/* ===== Divisão de conta: por pessoas (partes iguais) ou por agrupamento de itens ===== */
+const SP_MAX=20;
+const sp4=n=>Math.round(n*10000)/10000;
+function splitShares(c){const sp=c.split,out={},run={};sp.grupos.forEach(g=>{out[g.id]=[];run[g.id]=0});
+ c.itens.forEach((it,k)=>{const p=prod(it.pid);if(!p)return;const lineC=linhaC(p.preco,it.qtd);if(lineC<=0)return;
+  const ws=sp.grupos.map(g=>({g,w:sp.modo==='pessoas'?1:((sp.aloc[k]||{})[g.id]?1:0)})).filter(x=>x.w>0);if(!ws.length)return;
+  const W=ws.reduce((a,x)=>a+x.w,0),base=ws.map(x=>Math.floor(lineC*x.w/W));let rest=lineC-base.reduce((a,b)=>a+b,0);
+  const ord=ws.map((x,i)=>i).sort((a,b)=>(lineC*ws[b].w%W)-(lineC*ws[a].w%W)||run[ws[a].g.id]-run[ws[b].g.id]||a-b);
+  ord.forEach(i=>{if(rest>0){base[i]++;rest--}});
+  ws.forEach((x,i)=>{const s=base[i];if(s<=0)return;run[x.g.id]+=s;out[x.g.id].push({pid:it.pid,qtd:s===lineC?it.qtd:sp4(it.qtd*s/lineC),vl:s,obs:it.obs||''})})});
+ return out}
+const spPagos=c=>!!(c.split&&c.split.grupos.some(g=>g.pago));
+const spFim=c=>{const sh=splitShares(c);return c.split.grupos.filter(g=>sh[g.id].length).every(g=>g.pago)};
+function cmdRestante(c){if(!spPagos(c))return subtotal(c.itens);const sh=splitShares(c);return fromC(c.split.grupos.filter(g=>!g.pago).reduce((a,g)=>a+toC(subtotal(sh[g.id])),0))}
+function spSrc(r){const c=S.comandas.find(x=>x.id===r.id),g=c&&c.split&&c.split.grupos.find(x=>x.id===r.g);if(!g)return null;
+ return{id:c.id,gid:g.id,local:c.local+' · '+g.nome,mesa:c.mesa,pessoas:1,itens:splitShares(c)[g.id],canal:c.canal||'',cliente:'',pdv:false}}
+function spLock(c){if(!c||!c.split)return false;if(spPagos(c)){toast('Há partes da conta já recebidas: o consumo não pode mais ser alterado.');return true}c.split=null;toast('Divisão descartada porque o consumo foi alterado.');return false}
+function spPago(src,v){const c=S.comandas.find(x=>x.id===src.id),g=c.split.grupos.find(x=>x.id===src.gid);g.pago=v.id;g.vn=v.n;v.grupo=g.nome;v.cmdId=c.id;
+ if(spFim(c)){baixa(c.itens,1);S.comandas=S.comandas.filter(x=>x.id!==c.id);return true}return false}
+function drawSplit(){const c=curCmd();if(!c||!c.split){drawCmd();return}
+ const sp=c.split,sh=splitShares(c),pago=spPagos(c),ib=sp.modo==='itens';
+ const sem=ib?c.itens.map((x,k)=>k).filter(k=>{const p=prod(c.itens[k].pid);return p&&linhaC(p.preco,c.itens[k].qtd)>0&&!sp.grupos.some(g=>(sp.aloc[k]||{})[g.id])}):[];
+ const totC=toC(subtotal(c.itens)),gv=g=>toC(subtotal(sh[g.id]));
+ showModal(`<div class="mh"><h2>Dividir conta · ${esc(c.local)}</h2><button class="btn sm" data-act="spvolta">Voltar à comanda</button></div>
+ <div class="card"><div class="row"><span>Consumo total</span><b class="right">${money(fromC(totC))}</b></div>
+ <div class="row" style="margin-top:8px"><button class="btn sm ${ib?'':'on'}" data-act="spmodo" data-m="pessoas" ${pago?'disabled':''}>Por pessoas (partes iguais)</button><button class="btn sm ${ib?'on':''}" data-act="spmodo" data-m="itens" ${pago?'disabled':''}>Por agrupamento de itens</button>
+ <span class="right"><button class="btn sm" data-act="spn" data-d="-1" ${pago||sp.grupos.length<=2?'disabled':''} aria-label="Menos uma conta">-</button> <b>${sp.grupos.length} contas</b> <button class="btn sm" data-act="spn" data-d="1" ${pago||sp.grupos.length>=SP_MAX?'disabled':''} aria-label="Mais uma conta">+</button></span></div>
+ <p class="muted" style="margin:8px 0 0">${ib?'Marque, em cada item, a quais contas ele pertence. Item marcado em mais de uma conta é dividido em partes iguais entre elas.':'O valor de cada item é repartido igualmente; os centavos que sobram são distribuídos alternadamente, de modo que a soma das partes seja exatamente o consumo.'} Taxa de serviço e desconto são calculados em cada recebimento.</p></div>
+ ${ib?`<div class="card" style="margin-top:10px"><h3>Itens</h3>${c.itens.map((it,k)=>{const p=prod(it.pid);if(!p)return'';return`<div class="item" style="display:block"><div class="row"><b>${qf(it.qtd)}× ${esc(p.nome)}</b><span class="right muted">${money(fromC(linhaC(p.preco,it.qtd)))}</span></div><div class="row" style="margin-top:4px">${sp.grupos.map(g=>`<button class="btn sm ${(sp.aloc[k]||{})[g.id]?'on':''}" data-act="spt" data-k="${k}" data-g="${g.id}" ${pago?'disabled':''} aria-pressed="${!!(sp.aloc[k]||{})[g.id]}">${esc(g.nome)}</button>`).join('')}<button class="btn sm" data-act="spall" data-k="${k}" ${pago?'disabled':''}>÷ todos</button></div></div>`}).join('')}${sem.length?`<p class="bad" style="margin:8px 0 0"><b>${sem.length} item(ns) ainda sem conta.</b> Distribua todos os itens para receber.</p>`:''}</div>`:''}
+ <div class="card" style="margin-top:10px"><h3>Contas</h3>${sp.grupos.map(g=>{const v=gv(g),n=sh[g.id].length;return`<div class="row" style="margin:6px 0"><input value="${esc(g.nome)}" data-chg="spnome" data-g="${g.id}" style="width:150px" aria-label="Nome da conta" maxlength="30" ${g.pago?'disabled':''}><span class="muted">${n} item(ns)</span><b class="right">${money(fromC(v))}</b>${g.pago?chip('recebida · venda nº '+g.vn,'ok'):`<button class="btn sm pri" data-act="sprec" data-g="${g.id}" ${!n||sem.length?'disabled':''}>Receber</button>`}</div>`}).join('')}
+ <p class="muted" style="margin:6px 0 0">Soma das contas: ${money(fromC(sp.grupos.reduce((a,g)=>a+gv(g),0)))} · Já recebido (subtotal): ${money(fromC(sp.grupos.filter(g=>g.pago).reduce((a,g)=>a+gv(g),0)))}</p></div>
+ ${pago?'':`<div class="row" style="margin-top:10px"><button class="btn" data-act="spdesf">Desfazer divisão</button></div>`}`,true)}
+Object.assign(CH,{
+ spnome(v,d){const c=curCmd(),g=c&&c.split&&c.split.grupos.find(x=>x.id===d.g);if(!g||g.pago)return;g.nome=String(v).trim().slice(0,30)||g.nome;save();drawSplit()}});
+Object.assign(A,{
+ spopen(){const c=curCmd();if(!c||c.pdv||!c.itens.length)return;if(!c.split){const n=Math.max(2,Math.min(12,Math.round(c.pessoas)||2));c.split={modo:'pessoas',grupos:Array.from({length:n},(_,i)=>({id:'g'+(i+1),nome:'Conta '+(i+1),pago:null})),aloc:{}};save()}drawSplit()},
+ spvolta(){drawCmd()},
+ spmodo(d){const c=curCmd();if(!c||!c.split||spPagos(c))return;c.split.modo=d.m;save();drawSplit()},
+ spn(d){const c=curCmd();if(!c||!c.split||spPagos(c))return;const g=c.split.grupos,n=g.length+(+d.d);if(n<2||n>SP_MAX)return;
+  if(+d.d>0){let i=g.length+1;while(g.some(x=>x.id==='g'+i))i++;g.push({id:'g'+i,nome:'Conta '+(g.length+1),pago:null})}else{const r=g.pop();Object.values(c.split.aloc).forEach(o=>{delete o[r.id]})}save();drawSplit()},
+ spt(d){const c=curCmd();if(!c||!c.split||spPagos(c))return;const o=c.split.aloc[d.k]=c.split.aloc[d.k]||{};if(o[d.g])delete o[d.g];else o[d.g]=1;save();drawSplit()},
+ spall(d){const c=curCmd();if(!c||!c.split||spPagos(c))return;const o=c.split.aloc[d.k]=c.split.aloc[d.k]||{};const todos=c.split.grupos.every(g=>o[g.id]);c.split.grupos.forEach(g=>{if(todos)delete o[g.id];else o[g.id]=1});save();drawSplit()},
+ spdesf(){const c=curCmd();if(!c||!c.split||spPagos(c))return;c.split=null;save();toast('Divisão desfeita.');drawCmd()},
+ sprec(d){const c=curCmd();if(!c||!c.split)return;const g=c.split.grupos.find(x=>x.id===d.g);if(!g||g.pago)return;openPay({kind:'sp',id:c.id,g:g.id})}});
 if(CLOUD()){S=blankState('');showLogin()}else{S=load();save();retryPend();if(ui.user)render();else showLogin()}
 
 </script>
