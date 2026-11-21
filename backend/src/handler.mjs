@@ -31,8 +31,11 @@ const hashPin = (pin, salt) => crypto.scryptSync(String(pin), salt, 32).toString
 const pinOk = (pin, salt, hash) => { const a = Buffer.from(hashPin(pin, salt), 'hex'), b = Buffer.from(hash, 'hex'); return a.length === b.length && crypto.timingSafeEqual(a, b); };
 const validPin = p => /^\d{4,6}$/.test(String(p || ''));
 const slugify = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
-const only = s => String(s || '').replace(/\D/g, '');
-const dv11 = s => { let p = 2, sum = 0; for (let i = s.length - 1; i >= 0; i--) { sum += (+s[i]) * p; p = p === 9 ? 2 : p + 1; } const r = sum % 11; return r < 2 ? 0 : 11 - r; };
+const cnpjLimpo = s => String(s == null ? '' : s).toUpperCase().replace(/[^0-9A-Z]/g, '');
+const valCar = ch => ch.charCodeAt(0) - 48; // Receita Federal / NT Conjunta 2025.001: ASCII menos 48
+function dvCnpj(base) { const dv = (s, w) => { let t = 0; for (let i = 0; i < w.length; i++) t += valCar(s[i]) * w[i]; const r = t % 11; return r < 2 ? 0 : 11 - r; }; const d1 = dv(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); return '' + d1 + dv(base + d1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); }
+export function validaCnpj(c) { c = cnpjLimpo(c); return /^[0-9A-Z]{12}[0-9]{2}$/.test(c) && !/^(.)\1+$/.test(c) && dvCnpj(c.slice(0, 12)) === c.slice(12); }
+const dv11 = s => { let p = 2, sum = 0; for (let i = s.length - 1; i >= 0; i--) { sum += valCar(s[i]) * p; p = p === 9 ? 2 : p + 1; } const r = sum % 11; return r < 2 ? 0 : 11 - r; };
 
 export function createApp(deps) {
   const { doc, table, getSecret, now = () => Date.now(), fetchFn = globalThis.fetch, signupEnabled = true } = deps;
@@ -208,9 +211,11 @@ export function createApp(deps) {
   route('POST', '/nfce/transmit', async ({ claims, body }) => {
     const p = body.payload || {}, e = p.emitente || {};
     const meta = await get(T(claims.tid), 'META'), f = meta.fiscal || { provedor: 'simulado' };
+    if (e.cnpj && !validaCnpj(e.cnpj)) throw bad('CNPJ do emitente inválido.');
     const numero = Number(p.numero) > 0 ? Number(p.numero) : await nextCounter(claims.tid, 'n_nfce');
     const full = { ...p, numero };
     if (f.provedor === 'api' && f.url) {
+      if (!e.cnpj) throw bad('Informe o CNPJ do emitente nas configurações fiscais.');
       try {
         const r = await fetchFn(f.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (f.token || '') }, body: JSON.stringify(full) });
         const j = await r.json().catch(() => ({}));
@@ -219,7 +224,7 @@ export function createApp(deps) {
       } catch { return { numero, status: 'pendente', chave: '', protocolo: '', msg: 'Provedor inacessível: nota pendente de transmissão.' }; }
     }
     const d = new Date(now()), aamm = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0');
-    const base = String(UFC[e.uf] || 41) + aamm + only(e.cnpj).padStart(14, '0').slice(0, 14) + '65' + String(p.serie || 1).padStart(3, '0') + String(numero).padStart(9, '0') + '1' + String(crypto.randomInt(0, 1e8)).padStart(8, '0');
+    const base = String(UFC[e.uf] || 41) + aamm + cnpjLimpo(e.cnpj).padStart(14, '0').slice(0, 14) + '65' + String(p.serie || 1).padStart(3, '0') + String(numero).padStart(9, '0') + '1' + String(crypto.randomInt(0, 1e8)).padStart(8, '0');
     return { numero, status: 'autorizada', chave: base + dv11(base), protocolo: 'SIM' + String(now()).slice(-9), msg: 'Autorizada em simulação, sem valor fiscal.' };
   });
 

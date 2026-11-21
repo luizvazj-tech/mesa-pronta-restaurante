@@ -70,6 +70,9 @@ const pl = { numero: 0, serie: 1, emitente: { cnpj: '12.345.678/0001-95', uf: 'P
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: pl } }); assert.equal(r.data.numero, 1); assert.equal(r.data.chave.length, 44); assert.equal(r.data.status, 'autorizada');
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: pl } }); assert.equal(r.data.numero, 2); ok('NFC-e: número sequencial atribuído pelo servidor, chave de 44 dígitos');
 r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, numero: 2 } } }); assert.equal(r.data.numero, 2); ok('reenvio mantém o número');
+r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, emitente: { cnpj: '12.ABC.345/01DE-35', uf: 'PR' } } } });
+assert.equal(r.data.chave.length, 44); assert.ok(r.data.chave.includes('12ABC34501DE35')); assert.match(r.data.chave, /^[0-9A-Z]{43}[0-9]$/); ok('CNPJ alfanumérico: chave de 44 posições com letras no CNPJ');
+r = await call('POST', '/nfce/transmit', { token: tokC, body: { payload: { ...pl, emitente: { cnpj: '12.ABC.345/01DE-36', uf: 'PR' } } } }); assert.equal(r.status, 400); ok('CNPJ com dígito verificador inválido é rejeitado pelo servidor');
 r = await call('PUT', '/fiscal', { token: tokC, body: { provedor: 'api', url: 'https://x', token: 'seg' } }); assert.equal(r.status, 403); ok('só o proprietário configura o fiscal');
 r = await call('PUT', '/fiscal', { token: tokA, body: { provedor: 'api', url: 'http://inseguro' } }); assert.equal(r.status, 400); ok('URL do provedor exige https');
 r = await call('GET', '/nao-existe', { token: tokA }); assert.equal(r.status, 404);
